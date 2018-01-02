@@ -72,6 +72,15 @@ enum net_tcp_state {
 
 #define NET_TCP_FLAGS(hdr) (hdr->flags & NET_TCP_CTL)
 
+/* Length of TCP header, including options */
+/* "offset": 4-bit field in high nibble, units of dwords */
+#define NET_TCP_HDR_LEN(hdr) (4 * ((hdr)->offset >> 4))
+
+/* RFC 1122 4.2.2.6 "If an MSS option is not received at connection
+ * setup, TCP MUST assume a default send MSS of 536"
+ */
+#define NET_TCP_DEFAULT_MSS   536
+
 /* TCP max window size */
 #define NET_TCP_MAX_WIN   (4 * 1024)
 
@@ -80,11 +89,22 @@ enum net_tcp_state {
 
 #define NET_TCP_MAX_OPT_SIZE  8
 
-#define NET_TCP_MSS_HEADER    0x02040000 /* MSS option */
-#define NET_TCP_WINDOW_HEADER 0x30300    /* Window scale option */
+/* TCP Option codes */
+#define NET_TCP_END_OPT          0
+#define NET_TCP_NOP_OPT          1
+#define NET_TCP_MSS_OPT          2
+#define NET_TCP_WINDOW_SCALE_OPT 3
 
-#define NET_TCP_MSS_SIZE      4          /* MSS option size */
-#define NET_TCP_WINDOW_SIZE   3          /* Window scale option size */
+/* TCP Option sizes */
+#define NET_TCP_END_SIZE          1
+#define NET_TCP_NOP_SIZE          1
+#define NET_TCP_MSS_SIZE          4
+#define NET_TCP_WINDOW_SCALE_SIZE 3
+
+/** Parsed TCP option values for net_tcp_parse_opts()  */
+struct net_tcp_options {
+	u16_t mss;
+};
 
 /* Max received bytes to buffer internally */
 #define NET_TCP_BUF_MAX_LEN 1280
@@ -108,7 +128,10 @@ struct net_tcp {
 	struct k_delayed_work fin_timer;
 
 	/** Retransmit timer */
-	struct k_timer retry_timer;
+	struct k_delayed_work retry_timer;
+
+	/** TIME_WAIT timer */
+	struct k_delayed_work timewait_timer;
 
 	/** List pointer used for TCP retransmit buffering */
 	sys_slist_t sent_list;
@@ -148,7 +171,15 @@ struct net_tcp {
 	 */
 	struct k_sem connect_wait;
 
+	/**
+	 * Current TCP receive window for our side
+	 */
 	u16_t recv_wnd;
+
+	/**
+	 * Send MSS for the peer
+	 */
+	u16_t send_mss;
 };
 
 static inline bool net_tcp_is_used(struct net_tcp *tcp)
@@ -425,6 +456,23 @@ struct net_buf *net_tcp_set_chksum(struct net_pkt *pkt, struct net_buf *frag);
  * @return Return the checksum in host byte order.
  */
 u16_t net_tcp_get_chksum(struct net_pkt *pkt, struct net_buf *frag);
+
+/**
+ * @brief Parse TCP options from network packet.
+ *
+ * Parse TCP options, returning MSS value (as that the only one we
+ * handle so far).
+ *
+ * @param pkt Network packet
+ * @param opt_totlen Total length of options to parse
+ * @param opts Pointer to TCP options structure. (Each option is updated
+ * only if present, so the structure must be initialized with the default
+ * values.)
+ *
+ * @return 0 if no error, <0 in case of error
+ */
+int net_tcp_parse_opts(struct net_pkt *pkt, int opt_totlen,
+		       struct net_tcp_options *opts);
 
 #else
 

@@ -34,6 +34,7 @@ extern "C" {
 /**
  * @brief Network packet management library
  * @defgroup net_pkt Network Packet Library
+ * @ingroup networking
  * @{
  */
 
@@ -71,6 +72,8 @@ struct net_pkt {
 	/* Filled by layer 2 when network packet is received. */
 	struct net_linkaddr lladdr_src;
 	struct net_linkaddr lladdr_dst;
+
+	u16_t data_len;         /* amount of payload data that can be added */
 
 	u16_t appdatalen;
 	u8_t ll_reserve;	/* link layer header length */
@@ -121,7 +124,7 @@ struct net_pkt {
 #endif /* CONFIG_NET_IPV6_FRAGMENT */
 #endif /* CONFIG_NET_IPV6 */
 
-#if defined(CONFIG_NET_L2_IEEE802154)
+#if defined(CONFIG_NET_L2_IEEE802154) || defined(CONFIG_IEEE802154_RAW_MODE)
 	u8_t ieee802154_rssi; /* Received Signal Strength Indication */
 	u8_t ieee802154_lqi;  /* Link Quality Indicator */
 #endif
@@ -423,7 +426,7 @@ static inline void net_pkt_ll_swap(struct net_pkt *pkt)
 	net_pkt_ll_dst(pkt)->addr = addr;
 }
 
-#if defined(CONFIG_NET_L2_IEEE802154)
+#if defined(CONFIG_NET_L2_IEEE802154) || defined(CONFIG_IEEE802154_RAW_MODE)
 static inline u8_t net_pkt_ieee802154_rssi(struct net_pkt *pkt)
 {
 	return pkt->ieee802154_rssi;
@@ -1092,7 +1095,7 @@ struct net_buf *net_frag_read(struct net_buf *frag, u16_t offset,
  * length of data is placed in multiple fragments, this function will skip from
  * all fragments until it reaches N number of bytes. This function is useful
  * when unwanted data (e.g. reserved or not supported data in message) is part
- * of fragment and want to skip it.
+ * of fragment and we want to skip it.
  *
  * @param frag Network buffer fragment.
  * @param offset Offset of input buffer.
@@ -1418,6 +1421,19 @@ void net_pkt_get_info(struct k_mem_slab **rx,
  */
 
 int net_pkt_get_src_addr(struct net_pkt *pkt,
+			 struct sockaddr *addr,
+			 socklen_t addrlen);
+
+/**
+ * @brief Get destination socket address.
+ *
+ * @param pkt Network packet
+ * @param addr Destination socket address
+ * @param addrlen The length of destination socket address
+ * @return 0 on success, <0 otherwise.
+ */
+
+int net_pkt_get_dst_addr(struct net_pkt *pkt,
 			 struct sockaddr *addr,
 			 socklen_t addrlen);
 

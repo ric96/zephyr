@@ -38,6 +38,7 @@
 
 #include "net_private.h"
 #include "tcp.h"
+#include "rpl.h"
 
 #if defined(CONFIG_NET_TCP)
 #define APP_PROTO_LEN NET_TCPH_LEN
@@ -49,7 +50,7 @@
 #endif /* UDP */
 #endif /* TCP */
 
-#if defined(CONFIG_NET_IPV6) || defined(CONFIG_NET_L2_RAW_CHANNEL)
+#if defined(CONFIG_NET_IPV6) || defined(CONFIG_NET_RAW_MODE)
 #define IP_PROTO_LEN NET_IPV6H_LEN
 #else
 #if defined(CONFIG_NET_IPV4)
@@ -253,7 +254,7 @@ void net_pkt_print_frags(struct net_pkt *pkt)
 {
 	struct net_buf *frag;
 	size_t total = 0;
-	int count = -1, frag_size = 0, ll_overhead = 0;
+	int count = 0, frag_size = 0, ll_overhead = 0;
 
 	if (!pkt) {
 		NET_INFO("pkt %p", pkt);
@@ -286,7 +287,7 @@ void net_pkt_print_frags(struct net_pkt *pkt)
 	NET_INFO("Total data size %zu, occupied %d bytes, ll overhead %d, "
 		 "utilization %zu%%",
 		 total, count * frag_size - count * ll_overhead,
-		 count * ll_overhead, (total * 100) / (count * frag_size));
+		 count * ll_overhead, count ? (total * 100) / (count * frag_size) : 0);
 }
 
 struct net_pkt *net_pkt_get_reserve_debug(struct k_mem_slab *slab,
@@ -519,14 +520,50 @@ static struct net_pkt *net_pkt_get(struct k_mem_slab *slab,
 	pkt = net_pkt_get_reserve(slab, net_if_get_ll_reserve(iface, addr6),
 				  timeout);
 #endif
-	if (pkt) {
+	if (pkt && slab != &rx_pkts) {
+		sa_family_t family;
+		uint16_t iface_len, data_len = 0;
+		enum net_ip_protocol proto;
+
 		net_pkt_set_context(pkt, context);
 		net_pkt_set_iface(pkt, iface);
 
-		if (context) {
-			net_pkt_set_family(pkt,
-					   net_context_get_family(context));
+		iface_len = net_if_get_mtu(iface);
+
+		family = net_context_get_family(context);
+		net_pkt_set_family(pkt, family);
+
+		if (IS_ENABLED(CONFIG_NET_IPV6) && family == AF_INET6) {
+			data_len = max(iface_len, NET_IPV6_MTU);
+			data_len -= NET_IPV6H_LEN;
 		}
+
+		if (IS_ENABLED(CONFIG_NET_IPV4) && family == AF_INET) {
+			data_len = max(iface_len, NET_IPV4_MTU);
+			data_len -= NET_IPV4H_LEN;
+		}
+
+		proto = net_context_get_ip_proto(context);
+
+		if (IS_ENABLED(CONFIG_NET_TCP) && proto == IPPROTO_TCP) {
+			data_len -= NET_TCPH_LEN;
+			data_len -= NET_TCP_MAX_OPT_SIZE;
+		}
+
+		if (IS_ENABLED(CONFIG_NET_UDP) && proto == IPPROTO_UDP) {
+			data_len -= NET_UDPH_LEN;
+
+#if defined(CONFIG_NET_RPL_INSERT_HBH_OPTION)
+			data_len -= NET_RPL_HOP_BY_HOP_LEN;
+#endif
+
+		}
+
+		if (proto == IPPROTO_ICMP || proto == IPPROTO_ICMPV6) {
+			data_len -= NET_ICMPH_LEN;
+		}
+
+		pkt->data_len = data_len;
 	}
 
 	return pkt;
@@ -1163,6 +1200,8 @@ u16_t net_pkt_append(struct net_pkt *pkt, u16_t len, const u8_t *data,
 		    s32_t timeout)
 {
 	struct net_buf *frag;
+	struct net_context *ctx;
+	u16_t max_len, appended;
 
 	if (!pkt || !data) {
 		return 0;
@@ -1177,7 +1216,32 @@ u16_t net_pkt_append(struct net_pkt *pkt, u16_t len, const u8_t *data,
 		net_pkt_frag_add(pkt, frag);
 	}
 
-	return net_pkt_append_bytes(pkt, data, len, timeout);
+	ctx = net_pkt_context(pkt);
+	if (ctx) {
+		/* Make sure we don't send more data in one packet than
+		 * protocol or MTU allows when there is a context for the
+		 * packet.
+		 */
+		max_len = pkt->data_len;
+
+#if defined(CONFIG_NET_TCP)
+		if (ctx->tcp && (ctx->tcp->send_mss < max_len)) {
+			max_len = ctx->tcp->send_mss;
+		}
+#endif
+
+		if (len > max_len) {
+			len = max_len;
+		}
+	}
+
+	appended = net_pkt_append_bytes(pkt, data, len, timeout);
+
+	if (ctx) {
+		pkt->data_len -= appended;
+	}
+
+	return appended;
 }
 
 /* Helper routine to retrieve single byte from fragment and move
@@ -1215,11 +1279,7 @@ static inline struct net_buf *adjust_offset(struct net_buf *frag,
 	}
 
 	while (frag) {
-		if (offset == frag->len) {
-			*pos = 0;
-
-			return frag->frags;
-		} else if (offset < frag->len) {
+		if (offset < frag->len) {
 			*pos = offset;
 
 			return frag;
@@ -1228,8 +1288,6 @@ static inline struct net_buf *adjust_offset(struct net_buf *frag,
 		offset -= frag->len;
 		frag = frag->frags;
 	}
-
-	NET_ERR("Invalid offset (%u), failed to adjust", offset);
 
 	return NULL;
 }
@@ -1252,7 +1310,7 @@ struct net_buf *net_frag_read(struct net_buf *frag, u16_t offset,
 			frag = net_frag_read_byte(frag, *pos, pos, NULL);
 		}
 
-		/* Error: Still reamining length to be read, but no data. */
+		/* Error: Still remaining length to be read, but no data. */
 		if (!frag && len) {
 			NET_ERR("Not enough data to read");
 			goto error;
@@ -1656,8 +1714,8 @@ void net_pkt_get_info(struct k_mem_slab **rx,
 	}
 }
 
-int net_pkt_get_src_addr(struct net_pkt *pkt, struct sockaddr *addr,
-			 socklen_t addrlen)
+static int net_pkt_get_addr(struct net_pkt *pkt, bool is_src,
+			    struct sockaddr *addr, socklen_t addrlen)
 {
 	enum net_ip_protocol proto;
 	sa_family_t family;
@@ -1689,7 +1747,12 @@ int net_pkt_get_src_addr(struct net_pkt *pkt, struct sockaddr *addr,
 			return -EINVAL;
 		}
 
-		port = tcp_hdr->src_port;
+		if (is_src) {
+			port = tcp_hdr->src_port;
+		} else {
+			port = tcp_hdr->dst_port;
+		}
+
 	} else if (IS_ENABLED(CONFIG_NET_UDP) && proto == IPPROTO_UDP) {
 		struct net_udp_hdr hdr, *udp_hdr;
 
@@ -1698,7 +1761,12 @@ int net_pkt_get_src_addr(struct net_pkt *pkt, struct sockaddr *addr,
 			return -EINVAL;
 		}
 
-		port = udp_hdr->src_port;
+		if (is_src) {
+			port = udp_hdr->src_port;
+		} else {
+			port = udp_hdr->dst_port;
+		}
+
 	} else {
 		return -ENOTSUP;
 	}
@@ -1711,7 +1779,14 @@ int net_pkt_get_src_addr(struct net_pkt *pkt, struct sockaddr *addr,
 			return -EINVAL;
 		}
 
-		net_ipaddr_copy(&addr6->sin6_addr, &NET_IPV6_HDR(pkt)->src);
+		if (is_src) {
+			net_ipaddr_copy(&addr6->sin6_addr,
+					&NET_IPV6_HDR(pkt)->src);
+		} else {
+			net_ipaddr_copy(&addr6->sin6_addr,
+					&NET_IPV6_HDR(pkt)->dst);
+		}
+
 		addr6->sin6_port = port;
 	} else if (IS_ENABLED(CONFIG_NET_IPV4) && family == AF_INET) {
 		struct sockaddr_in *addr4 = net_sin(addr);
@@ -1720,13 +1795,32 @@ int net_pkt_get_src_addr(struct net_pkt *pkt, struct sockaddr *addr,
 			return -EINVAL;
 		}
 
-		net_ipaddr_copy(&addr4->sin_addr, &NET_IPV4_HDR(pkt)->src);
+		if (is_src) {
+			net_ipaddr_copy(&addr4->sin_addr,
+					&NET_IPV4_HDR(pkt)->src);
+		} else {
+			net_ipaddr_copy(&addr4->sin_addr,
+					&NET_IPV4_HDR(pkt)->dst);
+		}
+
 		addr4->sin_port = port;
 	} else {
 		return -ENOTSUP;
 	}
 
 	return 0;
+}
+
+int net_pkt_get_src_addr(struct net_pkt *pkt, struct sockaddr *addr,
+			 socklen_t addrlen)
+{
+	return net_pkt_get_addr(pkt, true, addr, addrlen);
+}
+
+int net_pkt_get_dst_addr(struct net_pkt *pkt, struct sockaddr *addr,
+			 socklen_t addrlen)
+{
+	return net_pkt_get_addr(pkt, false, addr, addrlen);
 }
 
 #if defined(CONFIG_NET_DEBUG_NET_PKT)

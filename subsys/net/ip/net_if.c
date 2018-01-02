@@ -26,8 +26,14 @@
 #include "net_stats.h"
 
 #define REACHABLE_TIME (30 * MSEC_PER_SEC) /* in ms */
-#define MIN_RANDOM_FACTOR (1/2)
-#define MAX_RANDOM_FACTOR (3/2)
+/*
+ * split the min/max random reachable factors into numerator/denominator
+ * so that integer-based math works better
+ */
+#define MIN_RANDOM_NUMER (1)
+#define MIN_RANDOM_DENOM (2)
+#define MAX_RANDOM_NUMER (3)
+#define MAX_RANDOM_DENOM (2)
 
 /* net_if dedicated section limiters */
 extern struct net_if __net_if_start[];
@@ -278,6 +284,15 @@ enum net_verdict net_if_send_data(struct net_if *iface, struct net_pkt *pkt)
 		net_pkt_ll_src(pkt)->len = net_pkt_ll_if(pkt)->len;
 	}
 
+#if defined(CONFIG_NET_LOOPBACK)
+	/* If the packet is destined back to us, then there is no need to do
+	 * additional checks, so let the packet through.
+	 */
+	if (iface->l2 == &NET_L2_GET_NAME(DUMMY)) {
+		goto send;
+	}
+#endif
+
 #if defined(CONFIG_NET_IPV6)
 	/* If the ll dst address is not set check if it is present in the nbr
 	 * cache.
@@ -291,6 +306,9 @@ enum net_verdict net_if_send_data(struct net_if *iface, struct net_pkt *pkt)
 	}
 #endif
 
+#if defined(CONFIG_NET_LOOPBACK)
+send:
+#endif
 	verdict = iface->l2->send(iface, pkt);
 
 done:
@@ -449,17 +467,6 @@ static void dad_timeout(struct k_work *work)
 		 * in this case as the address is our own one.
 		 */
 		net_ipv6_nbr_rm(iface, &ifaddr->address.in6_addr);
-
-		/* We join the allnodes group from here so that we have
-		 * a link local address defined. If done from ifup(),
-		 * we would only get unspecified address as a source
-		 * address. The allnodes multicast group is only joined
-		 * once in this case as the net_ipv6_mcast_join() checks
-		 * if we have already joined.
-		 */
-		join_mcast_allnodes(iface);
-
-		join_mcast_solicit_node(iface, &ifaddr->address.in6_addr);
 	}
 }
 
@@ -694,6 +701,17 @@ struct net_if_addr *net_if_ipv6_addr_add(struct net_if *iface,
 		NET_DBG("[%d] interface %p address %s type %s added", i, iface,
 			net_sprint_ipv6_addr(addr),
 			net_addr_type2str(addr_type));
+
+		/* RFC 4862 5.4.2
+		 * "Before sending a Neighbor Solicitation, an interface
+		 * MUST join the all-nodes multicast address and the
+		 * solicited-node multicast address of the tentative address."
+		 */
+		/* The allnodes multicast group is only joined once as
+		 * net_ipv6_mcast_join() checks if we have already joined.
+		 */
+		join_mcast_allnodes(iface);
+		join_mcast_solicit_node(iface, &iface->ipv6.unicast[i].address.in6_addr);
 
 		net_if_ipv6_start_dad(iface, &iface->ipv6.unicast[i]);
 
@@ -1406,10 +1424,18 @@ const struct in6_addr *net_if_ipv6_select_src_addr(struct net_if *dst_iface,
 
 u32_t net_if_ipv6_calc_reachable_time(struct net_if *iface)
 {
-	return MIN_RANDOM_FACTOR * iface->ipv6.base_reachable_time +
-		sys_rand32_get() %
-		(MAX_RANDOM_FACTOR * iface->ipv6.base_reachable_time -
-		 MIN_RANDOM_FACTOR * iface->ipv6.base_reachable_time);
+	u32_t min_reachable, max_reachable;
+
+	min_reachable = (MIN_RANDOM_NUMER * iface->ipv6.base_reachable_time)
+			/ MIN_RANDOM_DENOM;
+	max_reachable = (MAX_RANDOM_NUMER * iface->ipv6.base_reachable_time)
+			/ MAX_RANDOM_DENOM;
+
+	NET_DBG("min_reachable:%u max_reachable:%u", min_reachable,
+		max_reachable);
+
+	return min_reachable +
+	       sys_rand32_get() % (max_reachable - min_reachable);
 }
 
 #else /* CONFIG_NET_IPV6 */

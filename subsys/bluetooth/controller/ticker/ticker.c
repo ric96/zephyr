@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016 Nordic Semiconductor ASA
+ * Copyright (c) 2016-2017 Nordic Semiconductor ASA
  * Copyright (c) 2016 Vinayak Kariappa Chettimada
  *
  * SPDX-License-Identifier: Apache-2.0
@@ -9,6 +9,7 @@
 #include <soc.h>
 
 #include "hal/cntr.h"
+#include "memq.h"
 #include "ticker.h"
 
 #include "common/log.h"
@@ -1190,9 +1191,9 @@ static void ticker_instance0_sched(u8_t caller_id, u8_t callee_id, u8_t chain)
 		switch (callee_id) {
 		case CALL_ID_WORKER:
 		{
-			static void *link[2];
+			static memq_link_t link;
 			static struct mayfly m = {
-				0, 0, link,
+				0, 0, &link,
 				&_instance[0],
 				(void *)ticker_worker
 			};
@@ -1214,9 +1215,9 @@ static void ticker_instance0_sched(u8_t caller_id, u8_t callee_id, u8_t chain)
 		switch (callee_id) {
 		case CALL_ID_JOB:
 		{
-			static void *link[2];
+			static memq_link_t link;
 			static struct mayfly m = {
-				0, 0, link,
+				0, 0, &link,
 				(void *)&_instance[0],
 				(void *)ticker_job
 			};
@@ -1238,9 +1239,9 @@ static void ticker_instance0_sched(u8_t caller_id, u8_t callee_id, u8_t chain)
 		switch (callee_id) {
 		case CALL_ID_WORKER:
 		{
-			static void *link[2];
+			static memq_link_t link;
 			static struct mayfly m = {
-				0, 0, link,
+				0, 0, &link,
 				(void *)&_instance[0],
 				(void *)ticker_worker
 			};
@@ -1254,9 +1255,9 @@ static void ticker_instance0_sched(u8_t caller_id, u8_t callee_id, u8_t chain)
 
 		case CALL_ID_JOB:
 		{
-			static void *link[2];
+			static memq_link_t link;
 			static struct mayfly m = {
-				0, 0, link,
+				0, 0, &link,
 				(void *)&_instance[0],
 				(void *)ticker_job
 			};
@@ -1278,9 +1279,9 @@ static void ticker_instance0_sched(u8_t caller_id, u8_t callee_id, u8_t chain)
 		switch (callee_id) {
 		case CALL_ID_JOB:
 		{
-			static void *link[2];
+			static memq_link_t link;
 			static struct mayfly m = {
-				0, 0, link,
+				0, 0, &link,
 				(void *)&_instance[0],
 				(void *)ticker_job
 			};
@@ -1316,9 +1317,9 @@ static void ticker_instance1_sched(u8_t caller_id, u8_t callee_id, u8_t chain)
 		switch (callee_id) {
 		case CALL_ID_WORKER:
 		{
-			static void *link[2];
+			static memq_link_t link;
 			static struct mayfly m = {
-				0, 0, link,
+				0, 0, &link,
 				&_instance[1],
 				(void *)ticker_worker
 			};
@@ -1340,9 +1341,9 @@ static void ticker_instance1_sched(u8_t caller_id, u8_t callee_id, u8_t chain)
 		switch (callee_id) {
 		case CALL_ID_JOB:
 		{
-			static void *link[2];
+			static memq_link_t link;
 			static struct mayfly m = {
-				0, 0, link,
+				0, 0, &link,
 				(void *)&_instance[1],
 				(void *)ticker_job
 			};
@@ -1364,9 +1365,9 @@ static void ticker_instance1_sched(u8_t caller_id, u8_t callee_id, u8_t chain)
 		switch (callee_id) {
 		case CALL_ID_WORKER:
 		{
-			static void *link[2];
+			static memq_link_t link;
 			static struct mayfly m = {
-				0, 0, link,
+				0, 0, &link,
 				(void *)&_instance[1],
 				(void *)ticker_worker
 			};
@@ -1380,9 +1381,9 @@ static void ticker_instance1_sched(u8_t caller_id, u8_t callee_id, u8_t chain)
 
 		case CALL_ID_JOB:
 		{
-			static void *link[2];
+			static memq_link_t link;
 			static struct mayfly m = {
-				0, 0, link,
+				0, 0, &link,
 				(void *)&_instance[1],
 				(void *)ticker_job
 			};
@@ -1404,9 +1405,9 @@ static void ticker_instance1_sched(u8_t caller_id, u8_t callee_id, u8_t chain)
 		switch (callee_id) {
 		case CALL_ID_JOB:
 		{
-			static void *link[2];
+			static memq_link_t link;
 			static struct mayfly m = {
-				0, 0, link,
+				0, 0, &link,
 				(void *)&_instance[1],
 				(void *)ticker_job
 			};
@@ -1523,7 +1524,7 @@ void ticker_trigger(u8_t instance_index)
 u32_t ticker_start(u8_t instance_index, u8_t user_id, u8_t ticker_id,
 		   u32_t ticks_anchor, u32_t ticks_first, u32_t ticks_periodic,
 		   u32_t remainder_periodic, u16_t lazy, u16_t ticks_slot,
-		   ticker_timeout_func ticker_timeout_func, void *context,
+		   ticker_timeout_func fp_timeout_func, void *context,
 		   ticker_op_func fp_op_func, void *op_context)
 {
 	struct ticker_instance *instance = &_instance[instance_index];
@@ -1551,7 +1552,7 @@ u32_t ticker_start(u8_t instance_index, u8_t user_id, u8_t ticker_id,
 	user_op->params.start.remainder_periodic = remainder_periodic;
 	user_op->params.start.ticks_slot = ticks_slot;
 	user_op->params.start.lazy = lazy;
-	user_op->params.start.fp_timeout_func = ticker_timeout_func;
+	user_op->params.start.fp_timeout_func = fp_timeout_func;
 	user_op->params.start.context = context;
 	user_op->status = TICKER_STATUS_BUSY;
 	user_op->fp_op_func = fp_op_func;

@@ -39,8 +39,11 @@ enum {
 	BT_DEV_SCANNING,
 	BT_DEV_EXPLICIT_SCAN,
 	BT_DEV_ACTIVE_SCAN,
+	BT_DEV_SCAN_FILTER_DUP,
 
 	BT_DEV_RPA_VALID,
+
+	BT_DEV_ID_PENDING,
 
 #if defined(CONFIG_BT_BREDR)
 	BT_DEV_ISCAN,
@@ -63,6 +66,15 @@ struct bt_dev_le {
 	u16_t			mtu;
 	struct k_sem		pkts;
 #endif /* CONFIG_BT_CONN */
+
+#if defined(CONFIG_BT_SMP)
+	/* Size of the the controller resolving list */
+	u8_t                    rl_size;
+	/* Number of entries in the resolving list. rl_entries > rl_size
+	 * means that host-side resolving is used.
+	 */
+	u8_t                    rl_entries;
+#endif /* CONFIG_BT_SMP */
 };
 
 #if defined(CONFIG_BT_BREDR)
@@ -173,3 +185,8 @@ bool bt_addr_le_is_bonded(const bt_addr_le_t *addr);
 int bt_send(struct net_buf *buf);
 
 u16_t bt_hci_get_cmd_opcode(struct net_buf *buf);
+
+/* Don't require everyone to include keys.h */
+struct bt_keys;
+int bt_id_add(struct bt_keys *keys);
+int bt_id_del(struct bt_keys *keys);

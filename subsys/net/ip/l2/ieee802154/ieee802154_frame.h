@@ -15,6 +15,8 @@
 #include <kernel.h>
 #include <net/net_pkt.h>
 
+#include <net/ieee802154.h>
+
 #define IEEE802154_MTU				127
 #define IEEE802154_MIN_LENGTH			3
 /* See Section 5.2.1.4 */
@@ -452,6 +454,8 @@ struct ieee802154_frame_params {
 struct ieee802154_aux_security_hdr *
 ieee802154_validate_aux_security_hdr(u8_t *buf, u8_t **p_buf);
 #endif
+
+struct ieee802154_fcf_seq *ieee802154_validate_fc_seq(u8_t *buf, u8_t **p_buf);
 
 bool ieee802154_validate_frame(u8_t *buf, u8_t length,
 			       struct ieee802154_mpdu *mpdu);

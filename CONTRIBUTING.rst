@@ -32,7 +32,7 @@ this, check out articles such as `Why choose Apache 2.0 licensing`_ and
 `Top 10 Apache License Questions Answered`_).
 
 .. _Why choose Apache 2.0 licensing:
-   https://www.zephyrproject.org/about/faq/what-rationale-choosing-apache-20-license
+   https://www.zephyrproject.org/about/#faq
 
 .. _Top 10 Apache License Questions Answered:
    https://www.whitesourcesoftware.com/whitesource-blog/top-10-apache-license-questions-answered/
@@ -56,8 +56,8 @@ Importing code into the Zephyr OS from other projects that use a license
 other than the Apache 2.0 license needs to be fully understood in
 context and approved by the Zephyr governing board.
 
-By carefully reviewing potential contributions and also enforcing
-`developer attestations <DCO>`_ for contributed code, we can ensure that
+By carefully reviewing potential contributions and also enforcing a
+:ref:`DCO` for contributed code, we can ensure that
 the Zephyr community can develop products with the Zephyr Project
 without concerns over patent or copyright issues.
 
@@ -144,7 +144,7 @@ and how to set up your development environment as introduced in the Zephyr
    https://www.zephyrproject.org/doc/getting_started/getting_started.html
 
 The examples below use a Linux host environment for Zephyr development.
-You should be familiar with common developer tools such as Git and Make, and
+You should be familiar with common developer tools such as Git and CMake, and
 platforms such as GitHub.
 
 If you haven't already done so, you'll need to create a (free) GitHub account
@@ -184,6 +184,14 @@ solution).  You may find others that have encountered the issue you're
 finding, or that have similar ideas for changes or additions.  Send a message
 to the `Zephyr-devel mailing list`_ to introduce and discuss your idea with
 the development community.
+
+Please note that it's common practice on IRC to be away from the
+channel, but still have a client logged in to receive traffic. If you
+ask a question to a particular person and they don't answer, **try
+to stay signed in to the channel** if you can, so they have time to
+respond to you. This is especially important given the many different
+timezones Zephyr developers live in. If you don't get a timely
+response on IRC, try sending a message to the mailing list instead.
 
 It's always a good practice to search for existing or related issues before
 submitting your own. When you submit an issue (bug or feature request), the
@@ -233,18 +241,14 @@ run the same tests the CI system runs, follow these steps from within your
 local Zephyr source working directory::
 
     $ source zephyr-env.sh
-    $ make host-tools
-    $ export PREBUILT_HOST_TOOLS=${ZEPHYR_BASE}/bin
-    $ export USE_CCACHE=1
     $ ./scripts/sanitycheck
 
 The above will execute the basic sanitycheck script, which will run various
 kernel tests using the QEMU emulator.  It will also do some build tests on
 various samples with advanced features that can't run in QEMU.
 
-We highly recommend you run these tests locally to avoid any CI failures.
-Using CCACHE and pre-built host tools is optional, however it speeds up the
-execution time considerably.
+We highly recommend you run these tests locally to avoid any CI
+failures.
 
 
 Coding Style

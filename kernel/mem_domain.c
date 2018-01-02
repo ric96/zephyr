@@ -8,10 +8,21 @@
 #include <kernel.h>
 #include <kernel_structs.h>
 #include <nano_internal.h>
-
+#include <misc/__assert.h>
 
 static u8_t max_partitions;
 
+static void ensure_w_xor_x(u32_t attrs)
+{
+#if defined(CONFIG_EXECUTE_XOR_WRITE) && __ASSERT_ON
+	bool writable = K_MEM_PARTITION_IS_WRITABLE(attrs);
+	bool executable = K_MEM_PARTITION_IS_EXECUTABLE(attrs);
+
+	__ASSERT(writable != executable, "writable page not executable");
+#else
+	ARG_UNUSED(attrs);
+#endif
+}
 
 void k_mem_domain_init(struct k_mem_domain *domain, u32_t num_parts,
 		struct k_mem_partition *parts[])
@@ -31,6 +42,9 @@ void k_mem_domain_init(struct k_mem_domain *domain, u32_t num_parts,
 
 		for (i = 0; i < num_parts; i++) {
 			__ASSERT(parts[i], "");
+
+			ensure_w_xor_x(parts[i]->attr);
+
 			domain->partitions[i] = *parts[i];
 		}
 	}
@@ -48,6 +62,11 @@ void k_mem_domain_destroy(struct k_mem_domain *domain)
 	__ASSERT(domain, "");
 
 	key = irq_lock();
+
+	/* Handle architecture specifc destroy only if it is the current thread*/
+	if (_current->mem_domain_info.mem_domain == domain) {
+		_arch_mem_domain_destroy(domain);
+	}
 
 	SYS_DLIST_FOR_EACH_NODE_SAFE(&domain->mem_domain_q, node, next_node) {
 		struct k_thread *thread =
@@ -68,6 +87,8 @@ void k_mem_domain_add_partition(struct k_mem_domain *domain,
 
 	__ASSERT(domain && part, "");
 	__ASSERT(part->start + part->size > part->start, "");
+
+	ensure_w_xor_x(part->attr);
 
 	key = irq_lock();
 
@@ -111,6 +132,11 @@ void k_mem_domain_remove_partition(struct k_mem_domain *domain,
 	/* Assert if not found */
 	__ASSERT(p_idx < max_partitions, "");
 
+	/* Handle architecture specifc remove only if it is the current thread*/
+	if (_current->mem_domain_info.mem_domain == domain) {
+		_arch_mem_domain_partition_remove(domain, p_idx);
+	}
+
 	domain->partitions[p_idx].start = 0;
 	domain->partitions[p_idx].size = 0;
 	domain->partitions[p_idx].attr = 0;
@@ -132,6 +158,10 @@ void k_mem_domain_add_thread(struct k_mem_domain *domain, k_tid_t thread)
 			 &thread->mem_domain_info.mem_domain_q_node);
 	thread->mem_domain_info.mem_domain = domain;
 
+	if (_current == thread) {
+		_arch_mem_domain_configure(thread);
+	}
+
 	irq_unlock(key);
 }
 
@@ -142,6 +172,9 @@ void k_mem_domain_remove_thread(k_tid_t thread)
 	__ASSERT(thread && thread->mem_domain_info.mem_domain, "");
 
 	key = irq_lock();
+	if (_current == thread) {
+		_arch_mem_domain_destroy(thread->mem_domain_info.mem_domain);
+	}
 
 	sys_dlist_remove(&thread->mem_domain_info.mem_domain_q_node);
 	thread->mem_domain_info.mem_domain = NULL;

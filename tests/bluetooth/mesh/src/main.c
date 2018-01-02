@@ -10,15 +10,16 @@
 
 #include <bluetooth/bluetooth.h>
 #include <bluetooth/mesh.h>
-#include <ztest.h>
 
 #include "board.h"
 
 #define CID_INTEL 0x0002
 
+#define MAX_FAULT 24
+
 static bool has_reg_fault = true;
 
-static struct bt_mesh_cfg cfg_srv = {
+static struct bt_mesh_cfg_srv cfg_srv = {
 	.relay = BT_MESH_RELAY_DISABLED,
 	.beacon = BT_MESH_BEACON_DISABLED,
 #if defined(CONFIG_BT_MESH_FRIEND)
@@ -45,7 +46,7 @@ static struct bt_mesh_cfg cfg_srv = {
 static int fault_get_cur(struct bt_mesh_model *model, u8_t *test_id,
 			 u16_t *company_id, u8_t *faults, u8_t *fault_count)
 {
-	u8_t reg_faults[24] = { [0 ... 23] = 0xff };
+	u8_t reg_faults[MAX_FAULT] = { [0 ... (MAX_FAULT - 1)] = 0xff };
 
 	printk("fault_get_cur() has_reg_fault %u\n", has_reg_fault);
 
@@ -69,7 +70,7 @@ static int fault_get_reg(struct bt_mesh_model *model, u16_t company_id,
 	*test_id = 0x00;
 
 	if (has_reg_fault) {
-		u8_t reg_faults[24] = { [0 ... 23] = 0xff };
+		u8_t reg_faults[MAX_FAULT] = { [0 ... (MAX_FAULT - 1)] = 0xff };
 
 		memcpy(faults, reg_faults, sizeof(reg_faults));
 		*fault_count = sizeof(reg_faults);
@@ -104,28 +105,40 @@ static int fault_test(struct bt_mesh_model *model, uint8_t test_id,
 	return 0;
 }
 
-static struct bt_mesh_health health_srv = {
+static const struct bt_mesh_health_srv_cb health_srv_cb = {
 	.fault_get_cur = fault_get_cur,
 	.fault_get_reg = fault_get_reg,
 	.fault_clear = fault_clear,
 	.fault_test = fault_test,
 };
 
-static struct bt_mesh_model root_models[] = {
-	BT_MESH_MODEL_CFG_SRV(&cfg_srv),
-	BT_MESH_MODEL_HEALTH_SRV(&health_srv),
+static struct bt_mesh_health_srv health_srv = {
+	.cb = &health_srv_cb,
 };
 
-static void vnd_publish(struct bt_mesh_model *mod)
+static struct bt_mesh_model_pub health_pub = {
+	.msg = BT_MESH_HEALTH_FAULT_MSG(MAX_FAULT),
+};
+
+static struct bt_mesh_model root_models[] = {
+	BT_MESH_MODEL_CFG_SRV(&cfg_srv),
+	BT_MESH_MODEL_HEALTH_SRV(&health_srv, &health_pub),
+};
+
+static int vnd_publish(struct bt_mesh_model *mod)
 {
 	printk("Vendor publish\n");
+	return 0;
 }
 
 static struct bt_mesh_model_pub vnd_pub = {
-	.func = vnd_publish,
+	.update = vnd_publish,
+	.msg = NET_BUF_SIMPLE(4),
 };
 
-static struct bt_mesh_model_pub vnd_pub2;
+static struct bt_mesh_model_pub vnd_pub2 = {
+	.msg = NET_BUF_SIMPLE(4),
+};
 
 static const struct bt_mesh_model_op vnd_ops[] = {
 	BT_MESH_MODEL_OP_END,
@@ -147,7 +160,7 @@ static const struct bt_mesh_comp comp = {
 };
 
 #if 0
-static int output_number(bt_mesh_output_action action, uint32_t number)
+static int output_number(bt_mesh_output_action_t action, uint32_t number)
 {
 	printk("OOB Number: %u\n", number);
 
@@ -157,25 +170,18 @@ static int output_number(bt_mesh_output_action action, uint32_t number)
 }
 #endif
 
-#if defined(CONFIG_BT_MESH_LOW_POWER)
-static struct k_delayed_work timer;
-
-static void enable_lpn(struct k_work *work)
-{
-	printk("Enabling LPN\n");
-
-	bt_mesh_lpn_set(true);
-}
-#endif
-
-static void prov_complete(void)
+static void prov_complete(u16_t net_idx, u16_t addr)
 {
 	board_prov_complete();
 
-#if defined(CONFIG_BT_MESH_LOW_POWER)
-	k_delayed_work_init(&timer, enable_lpn);
-	k_delayed_work_submit(&timer, K_SECONDS(10));
-#endif
+	if (IS_ENABLED(CONFIG_BT_MESH_IV_UPDATE_TEST)) {
+		bt_mesh_iv_update_test(true);
+	}
+}
+
+static void prov_reset(void)
+{
+	bt_mesh_prov_enable(BT_MESH_PROV_ADV | BT_MESH_PROV_GATT);
 }
 
 static const u8_t dev_uuid[16] = { 0xdd, 0xdd };
@@ -188,32 +194,46 @@ static const struct bt_mesh_prov prov = {
 	.output_number = output_number,
 #endif
 	.complete = prov_complete,
+	.reset = prov_reset,
 };
 
 static void bt_ready(int err)
 {
-	zassert_false(err, "Bluetooth init failed");
+	if (err) {
+		printk("Bluetooth init failed (err %d)\n", err);
+		return;
+	}
 
 	printk("Bluetooth initialized\n");
 
 	board_init();
 
-	zassert_false(bt_mesh_init(&prov, &comp),
-			"Initializing mesh failed");
+	err = bt_mesh_init(&prov, &comp);
+	if (err) {
+		printk("Initializing mesh failed (err %d)\n", err);
+		return;
+	}
+
+	/* Initialize publication messages with dummy data */
+	net_buf_simple_init(vnd_pub.msg, 0);
+	net_buf_simple_add_le32(vnd_pub.msg, UINT32_MAX);
+	net_buf_simple_init(vnd_pub2.msg, 0);
+	net_buf_simple_add_le32(vnd_pub2.msg, UINT32_MAX);
+
+	bt_mesh_prov_enable(BT_MESH_PROV_ADV | BT_MESH_PROV_GATT);
 
 	printk("Mesh initialized\n");
 }
 
-void test_mesh(void)
+void main(void)
 {
-	/* Initialize the Bluetooth Subsystem */
-	zassert_false(bt_enable(bt_ready), "Bluetooth init failed");
-}
+	int err;
 
-/*test case main entry*/
-void test_main(void)
-{
-	ztest_test_suite(test_bluetooth_mesh,
-			ztest_unit_test(test_mesh));
-	ztest_run_test_suite(test_bluetooth_mesh);
+	printk("Initializing...\n");
+
+	/* Initialize the Bluetooth Subsystem */
+	err = bt_enable(bt_ready);
+	if (err) {
+		printk("Bluetooth init failed (err %d)\n", err);
+	}
 }

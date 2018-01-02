@@ -6,6 +6,8 @@
 #ifndef _ARM_CORE_MPU_DEV_H_
 #define _ARM_CORE_MPU_DEV_H_
 
+#include <zephyr/types.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -33,6 +35,9 @@ extern "C" {
 #define THREAD_DOMAIN_PARTITION_REGION 0x3
 
 #if defined(CONFIG_ARM_CORE_MPU)
+struct k_mem_domain;
+struct k_mem_partition;
+
 /* ARM Core MPU Driver API */
 
 /*
@@ -76,9 +81,21 @@ void arm_core_mpu_configure_mem_partition(u32_t part_index,
 					  struct k_mem_partition *part);
 
 /**
+ * @brief Reset MPU region for a single memory partition
+ *
+ * @param   part_index  memory partition index
+ */
+void arm_core_mpu_mem_partition_remove(u32_t part_index);
+
+/**
  * @brief get the maximum number of free regions for memory domain partitions
  */
 int arm_core_mpu_get_max_domain_partition_regions(void);
+
+/**
+ * @brief validate the given buffer is user accessible or not
+ */
+int arm_core_mpu_buffer_validate(void *addr, size_t size, int write);
 
 #endif /* CONFIG_ARM_CORE_MPU */
 

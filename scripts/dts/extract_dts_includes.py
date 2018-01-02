@@ -8,6 +8,7 @@ import os, fnmatch
 import re
 import yaml
 import argparse
+import collections
 
 from devicetree import parse_file
 
@@ -134,11 +135,13 @@ class Loader(yaml.Loader):
     def extractFile(self, filename):
         filepath = os.path.join(os.path.dirname(self._root), filename)
         if not os.path.isfile(filepath):
-            # we need to look in common directory
-            # take path and back up 2 directories and tack on '/common/yaml'
+            # we need to look in bindings/* directories
+            # take path and back up 1 directory and parse in '/bindings/*'
             filepath = os.path.dirname(self._root).split('/')
-            filepath = '/'.join(filepath[:-2])
-            filepath = os.path.join(filepath + '/common/yaml', filename)
+            filepath = '/'.join(filepath[:-1])
+            for root, dirnames, file in os.walk(filepath):
+                if fnmatch.filter(file, filename):
+                    filepath = os.path.join(root, filename)
         with open(filepath, 'r') as f:
             return yaml.load(f, Loader)
 
@@ -170,8 +173,8 @@ def compress_nodes(nodes, path):
     if 'props' in nodes:
         status = nodes['props'].get('status')
 
-    if status == "disabled":
-        return
+        if status == "disabled":
+            return
 
     if isinstance(nodes, dict):
         reduced[path] = dict(nodes)
@@ -196,6 +199,19 @@ def find_parent_irq_node(node_address):
 
     return reduced[phandles[interrupt_parent]]
 
+def find_parent_prop(node_address, prop):
+    parent_address = ''
+
+    for comp in node_address.split('/')[1:-1]:
+        parent_address += '/' + comp
+
+    if prop in reduced[parent_address]['props']:
+        parent_prop = reduced[parent_address]['props'].get(prop)
+    else:
+        raise Exception("Parent of node " + node_address +
+                        " has no " + prop + " property")
+
+    return parent_prop
 
 def extract_interrupts(node_address, yaml, y_key, names, defs, def_label):
     node = reduced[node_address]
@@ -427,6 +443,10 @@ def extract_single(node_address, yaml, prop, key, prefix, defs, def_label):
     else:
         k = convert_string_to_label(key).upper()
         label = def_label + '_' + k
+
+        if prop == 'parent-label':
+            prop = find_parent_prop(node_address, 'label')
+
         if isinstance(prop, str):
             prop = "\"" + prop + "\""
         prop_def[label] = prop
@@ -457,17 +477,58 @@ def extract_string_prop(node_address, yaml, key, label, defs):
     return
 
 
+def get_node_label(node_compat, node_address):
+
+    def_label = convert_string_to_label(node_compat.upper())
+    if '@' in node_address:
+        def_label += '_' + node_address.split('@')[-1].upper()
+    else:
+        def_label += convert_string_to_label(node_address.upper())
+
+    return def_label
+
 def extract_property(node_compat, yaml, node_address, y_key, y_val, names,
                      prefix, defs, label_override):
 
     if 'base_label' in yaml[node_compat]:
         def_label = yaml[node_compat].get('base_label')
     else:
-        def_label = convert_string_to_label(node_compat.upper())
-        if '@' in node_address:
-            def_label += '_' + node_address.split('@')[-1].upper()
-        else:
-            def_label += convert_string_to_label(node_address.upper())
+        def_label = get_node_label(node_compat, node_address)
+
+    if 'parent' in yaml[node_compat]:
+        if 'bus' in yaml[node_compat]['parent']:
+            # get parent label
+            parent_address = ''
+            for comp in node_address.split('/')[1:-1]:
+                parent_address += '/' + comp
+
+            #check parent has matching child bus value
+            try:
+                parent_yaml = \
+                    yaml[reduced[parent_address]['props']['compatible']]
+                parent_bus = parent_yaml['child']['bus']
+            except (KeyError, TypeError) as e:
+                raise Exception(str(node_address) + " defines parent " +
+                        str(parent_address) + " as bus master but " +
+                        str(parent_address) + " not configured as bus master " +
+                        "in yaml description")
+
+            if parent_bus != yaml[node_compat]['parent']['bus']:
+                bus_value = yaml[node_compat]['parent']['bus']
+                raise Exception(str(node_address) + " defines parent " +
+                        str(parent_address) + " as " + bus_value +
+                        " bus master but " + str(parent_address) +
+                        " configured as " + str(parent_bus) +
+                        " bus master")
+
+            # Use parent label to generate label
+            parent_label = get_node_label(
+                find_parent_prop(node_address,'compatible') , parent_address)
+            def_label = parent_label + '_' + def_label
+
+            # Generate bus-name define
+            extract_single(node_address, yaml, 'parent-label',
+                           'bus-name', prefix, defs, def_label)
 
     if label_override is not None:
         def_label += '_' + label_override
@@ -508,16 +569,15 @@ def extract_node_include_info(reduced, root_node_address, sub_node_address,
         y_node = y_sub
 
     if yaml[node_compat].get('use-property-label', False):
-        for yp in y_node['properties']:
-            if yp.get('label') is not None:
-                if node['props'].get('label') is not None:
-                    label_override = convert_string_to_label(
-                        node['props']['label']).upper()
-                    break
+        try:
+            label = y_node['properties']['label']
+            label_override = convert_string_to_label(
+                                    node['props']['label']).upper()
+        except KeyError:
+            pass
 
     # check to see if we need to process the properties
-    for yp in y_node['properties']:
-        for k, v in yp.items():
+    for k, v in y_node['properties'].items():
             if 'properties' in v:
                 for c in reduced:
                     if root_node_address + '/' in c:
@@ -552,36 +612,48 @@ def extract_node_include_info(reduced, root_node_address, sub_node_address,
 
     return
 
+def dict_merge(dct, merge_dct):
+    # from https://gist.github.com/angstwad/bf22d1822c38a92ec0a9
 
-def yaml_traverse_inherited(node, props):
-    if 'inherits' in node:
-        for inherited in node['inherits']:
-            yaml_traverse_inherited(inherited, props)
+    """ Recursive dict merge. Inspired by :meth:``dict.update()``, instead of
+    updating only top-level keys, dict_merge recurses down into dicts nested
+    to an arbitrary depth, updating keys. The ``merge_dct`` is merged into
+    ``dct``.
+    :param dct: dict onto which the merge is executed
+    :param merge_dct: dct merged into dct
+    :return: None
+    """
+    for k, v in merge_dct.items():
+        if (k in dct and isinstance(dct[k], dict)
+                and isinstance(merge_dct[k], collections.Mapping)):
+            dict_merge(dct[k], merge_dct[k])
+        else:
+            dct[k] = merge_dct[k]
 
-    for prop in node['properties']:
-        props.append(prop)
+def yaml_traverse_inherited(node):
+    """ Recursive overload procedure inside ``node``
+    ``inherits`` section is searched for and used as node base when found.
+    Base values are then overloaded by node values
+    :param node:
+    :return: node
+    """
 
-    return
+    if 'inherits' in node.keys():
+        if 'inherits' in node['inherits'].keys():
+            node['inherits'] = yaml_traverse_inherited(node['inherits'])
+        dict_merge(node['inherits'], node)
+        node = node['inherits']
+        node.pop('inherits')
+    return node
 
 
 def yaml_collapse(yaml_list):
+
     collapsed = dict(yaml_list)
 
     for k, v in collapsed.items():
-        existing = set()
-        if 'properties' in v:
-            for entry in v['properties']:
-                for key in entry:
-                    existing.add(key)
-
-        inh_list = []
-        if 'inherits' in v:
-            yaml_traverse_inherited(v, inh_list)
-            for prop in inh_list:
-                 for key in prop:
-                     if key not in existing:
-                         v['properties'].append(prop)
-            v.pop('inherits')
+        v = yaml_traverse_inherited(v)
+        collapsed[k]=v
 
     return collapsed
 

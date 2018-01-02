@@ -146,7 +146,7 @@ static void send_udp_data(struct net_app_ctx *ctx, struct data *data)
 
 	data->expecting_udp = sys_rand32_get() % ipsum_len;
 
-	pkt = prepare_send_pkt(ctx, data->proto, data->expecting_udp);
+	pkt = prepare_send_pkt(ctx, data->proto, &data->expecting_udp);
 	if (!pkt) {
 		return;
 	}
@@ -254,7 +254,7 @@ static void udp_connected(struct net_app_ctx *ctx,
 static int connect_udp(struct net_app_ctx *ctx, const char *peer,
 		       void *user_data, u8_t *dtls_result_buf,
 		       size_t dtls_result_buf_len,
-		       u8_t *stack, size_t stack_size)
+		       k_thread_stack_t *stack, size_t stack_size)
 {
 	struct data *data = user_data;
 	int ret;

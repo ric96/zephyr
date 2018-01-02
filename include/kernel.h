@@ -26,9 +26,11 @@
 #include <misc/slist.h>
 #include <misc/util.h>
 #include <kernel_version.h>
-#include <drivers/rand32.h>
+#include <random/rand32.h>
 #include <kernel_arch_thread.h>
 #include <syscall.h>
+#include <misc/printk.h>
+#include <arch/cpu.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -42,7 +44,6 @@ extern "C" {
  */
 
 #ifdef CONFIG_KERNEL_DEBUG
-#include <misc/printk.h>
 #define K_DEBUG(fmt, ...) printk("[%s]  " fmt, __func__, ##__VA_ARGS__)
 #else
 #define K_DEBUG(fmt, ...)
@@ -147,11 +148,8 @@ enum k_objects {
 	/* Driver subsystems */
 	K_OBJ_DRIVER_ADC,
 	K_OBJ_DRIVER_AIO_CMP,
-	K_OBJ_DRIVER_CLOCK_CONTROL,
 	K_OBJ_DRIVER_COUNTER,
 	K_OBJ_DRIVER_CRYPTO,
-	K_OBJ_DRIVER_DMA,
-	K_OBJ_DRIVER_ETH,
 	K_OBJ_DRIVER_FLASH,
 	K_OBJ_DRIVER_GPIO,
 	K_OBJ_DRIVER_I2C,
@@ -159,13 +157,11 @@ enum k_objects {
 	K_OBJ_DRIVER_IPM,
 	K_OBJ_DRIVER_PINMUX,
 	K_OBJ_DRIVER_PWM,
-	K_OBJ_DRIVER_RANDOM,
+	K_OBJ_DRIVER_ENTROPY,
 	K_OBJ_DRIVER_RTC,
 	K_OBJ_DRIVER_SENSOR,
-	K_OBJ_DRIVER_SHARED_IRQ,
 	K_OBJ_DRIVER_SPI,
 	K_OBJ_DRIVER_UART,
-	K_OBJ_DRIVER_WDT,
 
 	K_OBJ_LAST
 };
@@ -401,11 +397,6 @@ struct _thread_base {
 #ifdef CONFIG_SYS_CLOCK_EXISTS
 	/* this thread's entry in a timeout queue */
 	struct _timeout timeout;
-#endif
-
-#ifdef CONFIG_USERSPACE
-	/* Bit position in kernel object permissions bitfield for this thread */
-	unsigned int perm_index;
 #endif
 };
 
@@ -747,7 +738,6 @@ struct _static_thread_data {
 	u32_t init_options;
 	s32_t init_delay;
 	void (*init_abort)(void);
-	u32_t init_groups;
 };
 
 #define _THREAD_INITIALIZER(thread, stack, stack_size,           \
@@ -765,7 +755,6 @@ struct _static_thread_data {
 	.init_options = (options),                               \
 	.init_delay = (delay),                                   \
 	.init_abort = (abort),                                   \
-	.init_groups = (groups),                                 \
 	}
 
 /**
@@ -2428,7 +2417,7 @@ static inline int k_delayed_work_submit(struct k_delayed_work *work,
  *
  * This routine computes the (approximate) time remaining before a
  * delayed work gets executed. If the delayed work is not waiting to be
- * schedules, it returns zero.
+ * scheduled, it returns zero.
  *
  * @param work     Delayed work item.
  *
@@ -3541,23 +3530,28 @@ struct k_mem_pool {
 
 #define _MPOOL_HAVE_LVL(max, min, l) (((max) >> (2*(l))) >= (min) ? 1 : 0)
 
-#define _MPOOL_LVLS(maxsz, minsz)		\
-	(_MPOOL_HAVE_LVL(maxsz, minsz, 0) +	\
-	_MPOOL_HAVE_LVL(maxsz, minsz, 1) +	\
-	_MPOOL_HAVE_LVL(maxsz, minsz, 2) +	\
-	_MPOOL_HAVE_LVL(maxsz, minsz, 3) +	\
-	_MPOOL_HAVE_LVL(maxsz, minsz, 4) +	\
-	_MPOOL_HAVE_LVL(maxsz, minsz, 5) +	\
-	_MPOOL_HAVE_LVL(maxsz, minsz, 6) +	\
-	_MPOOL_HAVE_LVL(maxsz, minsz, 7) +	\
-	_MPOOL_HAVE_LVL(maxsz, minsz, 8) +	\
-	_MPOOL_HAVE_LVL(maxsz, minsz, 9) +	\
-	_MPOOL_HAVE_LVL(maxsz, minsz, 10) +	\
-	_MPOOL_HAVE_LVL(maxsz, minsz, 11) +	\
-	_MPOOL_HAVE_LVL(maxsz, minsz, 12) +	\
-	_MPOOL_HAVE_LVL(maxsz, minsz, 13) +	\
-	_MPOOL_HAVE_LVL(maxsz, minsz, 14) +	\
-	_MPOOL_HAVE_LVL(maxsz, minsz, 15))
+#define __MPOOL_LVLS(maxsz, minsz)		\
+	(_MPOOL_HAVE_LVL((maxsz), (minsz), 0) +	\
+	_MPOOL_HAVE_LVL((maxsz), (minsz), 1) +	\
+	_MPOOL_HAVE_LVL((maxsz), (minsz), 2) +	\
+	_MPOOL_HAVE_LVL((maxsz), (minsz), 3) +	\
+	_MPOOL_HAVE_LVL((maxsz), (minsz), 4) +	\
+	_MPOOL_HAVE_LVL((maxsz), (minsz), 5) +	\
+	_MPOOL_HAVE_LVL((maxsz), (minsz), 6) +	\
+	_MPOOL_HAVE_LVL((maxsz), (minsz), 7) +	\
+	_MPOOL_HAVE_LVL((maxsz), (minsz), 8) +	\
+	_MPOOL_HAVE_LVL((maxsz), (minsz), 9) +	\
+	_MPOOL_HAVE_LVL((maxsz), (minsz), 10) +	\
+	_MPOOL_HAVE_LVL((maxsz), (minsz), 11) +	\
+	_MPOOL_HAVE_LVL((maxsz), (minsz), 12) +	\
+	_MPOOL_HAVE_LVL((maxsz), (minsz), 13) +	\
+	_MPOOL_HAVE_LVL((maxsz), (minsz), 14) +	\
+	_MPOOL_HAVE_LVL((maxsz), (minsz), 15))
+
+#define _MPOOL_MINBLK sizeof(sys_dnode_t)
+
+#define _MPOOL_LVLS(max, min)		\
+	__MPOOL_LVLS((max), (min) >= _MPOOL_MINBLK ? (min) : _MPOOL_MINBLK)
 
 /* Rounds the needed bits up to integer multiples of u32_t */
 #define _MPOOL_LBIT_WORDS_UNCLAMPED(n_max, l) \
@@ -3667,17 +3661,6 @@ extern int k_mem_pool_alloc(struct k_mem_pool *pool, struct k_mem_block *block,
 extern void k_mem_pool_free(struct k_mem_block *block);
 
 /**
- * @brief Defragment a memory pool.
- *
- * This is a no-op API preserved for backward compatibility only.
- *
- * @param pool Unused
- *
- * @return N/A
- */
-static inline void __deprecated k_mem_pool_defrag(struct k_mem_pool *pool) {}
-
-/**
  * @} end addtogroup mem_pool_apis
  */
 
@@ -3712,6 +3695,19 @@ extern void *k_malloc(size_t size);
  * @return N/A
  */
 extern void k_free(void *ptr);
+
+/**
+ * @brief Allocate memory from heap, array style
+ *
+ * This routine provides traditional calloc() semantics. Memory is
+ * allocated from the heap memory pool and zeroed.
+ *
+ * @param nmemb Number of elements in the requested array
+ * @param size Size of each array element (in bytes).
+ *
+ * @return Address of the allocated memory if successful; otherwise NULL.
+ */
+extern void *k_calloc(size_t nmemb, size_t size);
 
 /**
  * @} end defgroup heap_apis
@@ -3775,10 +3771,6 @@ enum _poll_states_bits {
 	       + _POLL_NUM_STATES \
 	       + 1 /* modes */ \
 	      ))
-
-#if _POLL_EVENT_NUM_UNUSED_BITS < 0
-#error overflow of 32-bit word in struct k_poll_event
-#endif
 
 /* end of polling API - PRIVATE */
 
@@ -3939,6 +3931,7 @@ extern void k_poll_event_init(struct k_poll_event *event, u32_t type,
  *
  * @retval 0 One or more events are ready.
  * @retval -EAGAIN Waiting period timed out.
+ * @retval -EINTR Poller thread has been interrupted.
  */
 
 extern int k_poll(struct k_poll_event *events, int num_events,
@@ -4012,14 +4005,10 @@ extern void k_cpu_atomic_idle(unsigned int key);
 
 extern void _sys_power_save_idle_exit(s32_t ticks);
 
-#include <arch/cpu.h>
-
 #ifdef _ARCH_EXCEPT
 /* This archtecture has direct support for triggering a CPU exception */
 #define _k_except_reason(reason)	_ARCH_EXCEPT(reason)
 #else
-
-#include <misc/printk.h>
 
 /* NOTE: This is the implementation for arches that do not implement
  * _ARCH_EXCEPT() to generate a real CPU exception.
@@ -4222,28 +4211,30 @@ static inline char *K_THREAD_STACK_BUFFER(k_thread_stack_t *sym)
 		MEM_PARTITION_ENTRY((u32_t)start, size, attr)
 #endif /* _ARCH_MEM_PARTITION_ALIGN_CHECK */
 
-
 /* memory partition */
 struct k_mem_partition {
 	/* start address of memory partition */
 	u32_t start;
 	/* size of memory partition */
 	u32_t size;
+#ifdef CONFIG_USERSPACE
 	/* attribute of memory partition */
-	u32_t attr;
+	k_mem_partition_attr_t attr;
+#endif	/* CONFIG_USERSPACE */
 };
 
-#if defined(CONFIG_USERSPACE)
 /* memory domian */
 struct k_mem_domain {
 	/* number of partitions in the domain */
 	u32_t num_partitions;
+#ifdef CONFIG_USERSPACE
 	/* partitions in the domain */
 	struct k_mem_partition partitions[CONFIG_MAX_DOMAIN_PARTITIONS];
+#endif	/* CONFIG_USERSPACE */
 	/* domain q */
 	sys_dlist_t mem_domain_q;
 };
-#endif /* CONFIG_USERSPACE */
+
 
 /**
  * @brief Initialize a memory domain.

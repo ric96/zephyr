@@ -48,15 +48,16 @@ typedef int (*flash_api_write_protection)(struct device *dev, bool enable);
  * @brief Retrieve a flash device's layout.
  *
  * A flash device layout is a run-length encoded description of the
- * pages on the device.
+ * pages on the device. (Here, "page" means the smallest erasable
+ * area on the flash device.)
  *
- * For flash memories which have uniform sector layout, this routine
+ * For flash memories which have uniform page sizes, this routine
  * returns an array of length 1, which specifies the page size and
  * number of pages in the memory.
  *
- * Layouts for flash memories with nonuniform sector sizes will be
+ * Layouts for flash memories with nonuniform page sizes will be
  * returned as an array with multiple elements, each of which
- * describes a group of sectors that all have the same size. In this
+ * describes a group of pages that all have the same size. In this
  * case, the sequence of array elements specifies the order in which
  * these groups occur on the device.
  *
@@ -64,7 +65,6 @@ typedef int (*flash_api_write_protection)(struct device *dev, bool enable);
  * @param layout      The flash layout will be returned in this argument.
  * @param layout_size The number of elements in the returned layout.
  */
-
 typedef void (*flash_api_pages_layout)(struct device *dev,
 				       const struct flash_pages_layout **layout,
 				       size_t *layout_size);
@@ -91,7 +91,10 @@ struct flash_driver_api {
  *
  *  @return  0 on success, negative errno code on fail.
  */
-static inline int flash_read(struct device *dev, off_t offset, void *data,
+__syscall int flash_read(struct device *dev, off_t offset, void *data,
+			 size_t len);
+
+static inline int _impl_flash_read(struct device *dev, off_t offset, void *data,
 			     size_t len)
 {
 	const struct flash_driver_api *api = dev->driver_api;
@@ -112,8 +115,11 @@ static inline int flash_read(struct device *dev, off_t offset, void *data,
  *
  *  @return  0 on success, negative errno code on fail.
  */
-static inline int flash_write(struct device *dev, off_t offset,
-			      const void *data, size_t len)
+__syscall int flash_write(struct device *dev, off_t offset, const void *data,
+			  size_t len);
+
+static inline int _impl_flash_write(struct device *dev, off_t offset,
+				    const void *data, size_t len)
 {
 	const struct flash_driver_api *api = dev->driver_api;
 
@@ -124,8 +130,10 @@ static inline int flash_write(struct device *dev, off_t offset,
  *  @brief  Erase part or all of a flash memory
  *
  *  Acceptable values of erase size and offset are subject to
- *  hardware-specific multiples of sector size and offset. Please check the
- *  API implemented by the underlying sub driver.
+ *  hardware-specific multiples of page size and offset. Please check
+ *  the API implemented by the underlying sub driver, for example by
+ *  using flash_get_page_info_by_offs() if that is supported by your
+ *  flash driver.
  *
  *  Prior to the invocation of this API, the flash_write_protection_set needs
  *  to be called first to disable the write protection.
@@ -135,8 +143,14 @@ static inline int flash_write(struct device *dev, off_t offset,
  *  @param  size            : size of area to be erased
  *
  *  @return  0 on success, negative errno code on fail.
+ *
+ *  @see flash_get_page_info_by_offs()
+ *  @see flash_get_page_info_by_idx()
  */
-static inline int flash_erase(struct device *dev, off_t offset, size_t size)
+__syscall int flash_erase(struct device *dev, off_t offset, size_t size);
+
+static inline int _impl_flash_erase(struct device *dev, off_t offset,
+				    size_t size)
 {
 	const struct flash_driver_api *api = dev->driver_api;
 
@@ -159,14 +173,15 @@ static inline int flash_erase(struct device *dev, off_t offset, size_t size)
  *
  *  @return  0 on success, negative errno code on fail.
  */
-static inline int flash_write_protection_set(struct device *dev, bool enable)
+__syscall int flash_write_protection_set(struct device *dev, bool enable);
+
+static inline int _impl_flash_write_protection_set(struct device *dev,
+						   bool enable)
 {
 	const struct flash_driver_api *api = dev->driver_api;
 
 	return api->write_protection(dev, enable);
 }
-
-#if defined(CONFIG_FLASH_PAGE_LAYOUT)
 
 struct flash_pages_info {
 	off_t start_offset; /* offset from the base of flash address */
@@ -174,8 +189,9 @@ struct flash_pages_info {
 	u32_t index;
 };
 
+#if defined(CONFIG_FLASH_PAGE_LAYOUT)
 /**
- *  @brief  Get size and start offset of flash page at certain flash offset.
+ *  @brief  Get the size and start offset of flash page at certain flash offset.
  *
  *  @param  dev flash device
  *  @param  offset Offset within the page
@@ -183,11 +199,11 @@ struct flash_pages_info {
  *
  *  @return  0 on success, -EINVAL if page of the offset doesn't exist.
  */
-int flash_get_page_info_by_offs(struct device *dev, off_t offset,
-				struct flash_pages_info *info);
+__syscall int flash_get_page_info_by_offs(struct device *dev, off_t offset,
+					  struct flash_pages_info *info);
 
 /**
- *  @brief  Get size and start offset of flash page of certain index.
+ *  @brief  Get the size and start offset of flash page of certain index.
  *
  *  @param  dev flash device
  *  @param  page_index Index of the page. Index are counted from 0.
@@ -195,17 +211,17 @@ int flash_get_page_info_by_offs(struct device *dev, off_t offset,
  *
  *  @return  0 on success, -EINVAL  if page of the index doesn't exist.
  */
-int flash_get_page_info_by_idx(struct device *dev, u32_t page_index,
-			       struct flash_pages_info *info);
+__syscall int flash_get_page_info_by_idx(struct device *dev, u32_t page_index,
+					 struct flash_pages_info *info);
 
 /**
- *  @brief  Get number of flash pages.
+ *  @brief  Get the total number of flash pages.
  *
  *  @param  dev flash device
  *
  *  @return  Number of flash pages.
  */
-size_t flash_get_page_count(struct device *dev);
+__syscall size_t flash_get_page_count(struct device *dev);
 
 /**
  * @brief Callback type for iterating over flash pages present on a device.
@@ -220,7 +236,7 @@ size_t flash_get_page_count(struct device *dev);
 typedef bool (*flash_page_cb)(const struct flash_pages_info *info, void *data);
 
 /**
- * @brief Iterate over flash pages on a device
+ * @brief Iterate over all flash pages on a device
  *
  * This routine iterates over all flash pages on the given device,
  * ordered by increasing start offset. For each page, it invokes the
@@ -237,15 +253,17 @@ void flash_page_foreach(struct device *dev, flash_page_cb cb, void *data);
 /**
  *  @brief  Get the minimum write block size supported by the driver
  *
- *  The Write block size supported by the driver might defer from the write
+ *  The write block size supported by the driver might differ from the write
  *  block size of memory used because the driver might implements write-modify
  *  algorithm.
  *
  *  @param  dev flash device
  *
- *  @return  write block size in Bytes.
+ *  @return  write block size in bytes.
  */
-static inline size_t flash_get_write_block_size(struct device *dev)
+__syscall size_t flash_get_write_block_size(struct device *dev);
+
+static inline size_t _impl_flash_get_write_block_size(struct device *dev)
 {
 	const struct flash_driver_api *api = dev->driver_api;
 
@@ -259,5 +277,7 @@ static inline size_t flash_get_write_block_size(struct device *dev)
 /**
  * @}
  */
+
+#include <syscalls/flash.h>
 
 #endif /* _FLASH_H_ */

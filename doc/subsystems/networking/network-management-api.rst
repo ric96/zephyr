@@ -54,7 +54,7 @@ code. This makes it possible for different events to be handled by the
 same callback function, if desired.
 
 See an example of registering callback functions and using the network
-management API in :file:`test/net/mgmt/src/mgmt.c`.
+management API in :file:`tests/net/mgmt/src/mgmt.c`.
 
 Defining a network management procedure
 ***************************************
@@ -96,6 +96,6 @@ Signaling a network event
 You can signal a specific network event using the :cpp:func:`net_mgmt_notify()`
 function and provide the network event code. See
 :file:`include/net/net_mgmt.h` for details. As for the management request
-code, event code can be also found on specific L2 technology headers,
-for example :file:`include/net/ieee802154.h` would be the right place if
+code, event code can be also found on specific L2 technology mgmt headers,
+for example :file:`include/net/ieee802154_mgmt.h` would be the right place if
 802.15.4 L2 is the technology one wants to listen to events.

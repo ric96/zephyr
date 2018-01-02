@@ -23,6 +23,8 @@
 #define LWM2M_FORMAT_OMA_OLD_OPAQUE	1544
 #define LWM2M_FORMAT_OMA_TLV		11542
 #define LWM2M_FORMAT_OMA_JSON		11543
+/* 65000 ~ 65535 inclusive are reserved for experiments */
+#define LWM2M_FORMAT_NONE		65535
 
 
 #define COAP_RESPONSE_CODE_CLASS(x)	(x >> 5)
@@ -34,6 +36,9 @@
 
 /* Use this value to skip token generation */
 #define LWM2M_MSG_TOKEN_LEN_SKIP	0xFF
+
+/* length of time in milliseconds to wait for buffer allocations */
+#define BUF_ALLOC_TIMEOUT K_SECONDS(1)
 
 struct lwm2m_message;
 
@@ -101,11 +106,6 @@ int lwm2m_write_handler(struct lwm2m_engine_obj_inst *obj_inst,
 			struct lwm2m_engine_obj_field *obj_field,
 			struct lwm2m_engine_context *context);
 
-/* CoAP payload functions */
-u8_t *coap_packet_get_payload_ptr(struct coap_packet *cpkt, u16_t *len,
-				  bool start_marker);
-int coap_packet_set_used(struct coap_packet *cpkt, u16_t len);
-
 void lwm2m_udp_receive(struct lwm2m_ctx *client_ctx, struct net_pkt *pkt,
 		       bool handle_separate_response,
 		       udp_request_handler_cb_t udp_request_handler);
@@ -113,6 +113,12 @@ void lwm2m_udp_receive(struct lwm2m_ctx *client_ctx, struct net_pkt *pkt,
 enum coap_block_size lwm2m_default_block_size(void);
 
 int lwm2m_engine_add_service(void (*service)(void), u32_t period_ms);
+
+int lwm2m_engine_get_resource(char *pathstr,
+			      struct lwm2m_engine_res_inst **res);
+
+size_t lwm2m_engine_get_opaque_more(struct lwm2m_input_context *in,
+				    u8_t *buf, size_t buflen, bool *last_block);
 
 #if defined(CONFIG_LWM2M_FIRMWARE_UPDATE_OBJ_SUPPORT)
 u8_t lwm2m_firmware_get_update_state(void);

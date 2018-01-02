@@ -26,7 +26,7 @@
 
 #include <device.h>
 #include <misc/util.h>
-#include <drivers/rand32.h>
+#include <random/rand32.h>
 
 #include <stm32f0xx.h>
 
@@ -42,6 +42,14 @@
 #include <stm32f0xx_ll_rcc.h>
 #include <stm32f0xx_ll_system.h>
 #endif /* CONFIG_CLOCK_CONTROL_STM32_CUBE */
+
+#ifdef CONFIG_IWDG_STM32
+#include <stm32f0xx_ll_iwdg.h>
+#endif
+
+#ifdef CONFIG_I2C_STM32_V2
+#include <stm32f0xx_ll_i2c.h>
+#endif
 
 #endif /* !_ASMLANGUAGE */
 

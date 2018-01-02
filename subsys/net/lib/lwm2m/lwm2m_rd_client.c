@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2017 Linaro Limited
+ * Copyright (c) 2017 Open Source Foundries Limited.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -160,37 +161,51 @@ static u8_t get_sm_state(int index)
 static int find_clients_index(const struct sockaddr *addr)
 {
 	int index = -1, i;
-	struct sockaddr *remote;
+	struct sockaddr *remote = NULL;
+	struct net_app_ctx *net_app_ctx;
 
 	for (i = 0; i < client_count; i++) {
-		remote = &clients[i].ctx->net_app_ctx.default_ctx->remote;
-		if (clients[i].ctx) {
-			if (remote->sa_family != addr->sa_family) {
-				continue;
-			}
+		if (!clients[i].ctx) {
+			continue;
+		}
+
+		net_app_ctx = &clients[i].ctx->net_app_ctx;
+
+#if defined(CONFIG_NET_APP_DTLS)
+		if (net_app_ctx->dtls.ctx) {
+			remote = &net_app_ctx->dtls.ctx->remote;
+		}
+#endif
+
+		if (!remote) {
+			remote = &net_app_ctx->default_ctx->remote;
+		}
+
+		if (remote->sa_family != addr->sa_family) {
+			continue;
+		}
 
 #if defined(CONFIG_NET_IPV6)
-			if (remote->sa_family == AF_INET6 &&
-			    net_ipv6_addr_cmp(&net_sin6(remote)->sin6_addr,
-					      &net_sin6(addr)->sin6_addr) &&
-			    net_sin6(remote)->sin6_port ==
-					net_sin6(addr)->sin6_port) {
-				index = i;
-				break;
-			}
+		if (remote->sa_family == AF_INET6 &&
+		    net_ipv6_addr_cmp(&net_sin6(remote)->sin6_addr,
+				      &net_sin6(addr)->sin6_addr) &&
+		    net_sin6(remote)->sin6_port ==
+				net_sin6(addr)->sin6_port) {
+			index = i;
+			break;
+		}
 #endif
 
 #if defined(CONFIG_NET_IPV4)
-			if (remote->sa_family == AF_INET &&
-			    net_ipv4_addr_cmp(&net_sin(remote)->sin_addr,
-					      &net_sin(addr)->sin_addr) &&
-			    net_sin(remote)->sin_port ==
-					net_sin(addr)->sin_port) {
-				index = i;
-				break;
-			}
-#endif
+		if (remote->sa_family == AF_INET &&
+		    net_ipv4_addr_cmp(&net_sin(remote)->sin_addr,
+				      &net_sin(addr)->sin_addr) &&
+		    net_sin(remote)->sin_port ==
+				net_sin(addr)->sin_port) {
+			index = i;
+			break;
 		}
+#endif
 	}
 
 	return index;
@@ -502,6 +517,7 @@ static int sm_do_bootstrap(int index)
 	struct lwm2m_message *msg;
 	struct net_app_ctx *app_ctx = NULL;
 	int ret;
+	struct sockaddr *remote = NULL;
 
 	if (clients[index].use_bootstrap &&
 	    clients[index].bootstrapped == 0 &&
@@ -535,9 +551,18 @@ static int sm_do_bootstrap(int index)
 					  query_buffer, strlen(query_buffer));
 
 		/* log the bootstrap attempt */
+#if defined(CONFIG_NET_APP_DTLS)
+		if (app_ctx->dtls.ctx) {
+			remote = &app_ctx->dtls.ctx->remote;
+		}
+#endif
+
+		if (!remote) {
+			remote = &app_ctx->default_ctx->remote;
+		}
+
 		SYS_LOG_DBG("Register ID with bootstrap server [%s] as '%s'",
-			    lwm2m_sprint_ip_addr(
-				&app_ctx->default_ctx->remote),
+			    lwm2m_sprint_ip_addr(remote),
 			    query_buffer);
 
 		ret = lwm2m_send_message(msg);
@@ -606,9 +631,9 @@ static int sm_send_registration(int index, bool send_obj_support_data,
 {
 	struct net_app_ctx *app_ctx = NULL;
 	struct lwm2m_message *msg;
-	u8_t *payload;
-	u16_t client_data_len, len;
+	u16_t client_data_len;
 	int ret;
+	struct sockaddr *remote = NULL;
 
 	app_ctx = &clients[index].ctx->net_app_ctx;
 	msg = lwm2m_get_message(clients[index].ctx);
@@ -667,18 +692,18 @@ static int sm_send_registration(int index, bool send_obj_support_data,
 	/* TODO: add supported binding query string */
 
 	if (send_obj_support_data) {
-		/* generate the rd data */
-		client_data_len = lwm2m_get_rd_data(client_data,
-						    sizeof(client_data));
-		payload = coap_packet_get_payload_ptr(&msg->cpkt, &len, true);
-		if (!payload) {
-			ret = -EINVAL;
+		ret = coap_packet_append_payload_marker(&msg->cpkt);
+		if (ret < 0) {
 			goto cleanup;
 		}
 
-		memcpy(payload, client_data, client_data_len);
-		ret = coap_packet_set_used(&msg->cpkt, client_data_len);
-		if (ret) {
+		/* generate the rd data */
+		client_data_len = lwm2m_get_rd_data(client_data,
+						    sizeof(client_data));
+
+		if (!net_pkt_append_all(msg->cpkt.pkt, client_data_len,
+					client_data, BUF_ALLOC_TIMEOUT)) {
+			ret = -ENOMEM;
 			goto cleanup;
 		}
 	}
@@ -691,8 +716,18 @@ static int sm_send_registration(int index, bool send_obj_support_data,
 	}
 
 	/* log the registration attempt */
+#if defined(CONFIG_NET_APP_DTLS)
+	if (app_ctx->dtls.ctx) {
+		remote = &app_ctx->dtls.ctx->remote;
+	}
+#endif
+
+	if (!remote) {
+		remote = &app_ctx->default_ctx->remote;
+	}
+
 	SYS_LOG_DBG("registration sent [%s]",
-		    lwm2m_sprint_ip_addr(&app_ctx->default_ctx->remote));
+		    lwm2m_sprint_ip_addr(remote));
 
 	return 0;
 

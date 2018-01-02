@@ -26,7 +26,7 @@
 
 #include <device.h>
 #include <misc/util.h>
-#include <drivers/rand32.h>
+#include <random/rand32.h>
 
 #include <stm32f4xx.h>
 
@@ -48,7 +48,7 @@
 #include <stm32f4xx_ll_i2c.h>
 #endif
 
-#ifdef CONFIG_RANDOM_STM32_RNG
+#ifdef CONFIG_ENTROPY_STM32_RNG
 #include <stm32f4xx_ll_rng.h>
 #endif
 

@@ -5,8 +5,8 @@
  */
 
 #include <zephyr.h>
-#include <inttypes.h>
 #include <tc_util.h>
+#include <ztest.h>
 
 int test_frequency(void)
 {
@@ -34,11 +34,10 @@ int test_frequency(void)
 }
 
 
-void main(void)
+void test_timer(void)
 {
 	u32_t t_last, t_now, i, errors;
 	s32_t diff;
-	int rv = TC_PASS;
 
 	errors = 0;
 
@@ -57,25 +56,20 @@ void main(void)
 
 		if (t_now < t_last) {
 			diff = t_now - t_last;
-			TC_PRINT("diff = %" PRId32 " (t_last = %" PRIu32
-				 " : t_now = %" PRIu32 "); i = %u\n",
-				 diff, t_last, t_now, i);
+			TC_PRINT("diff = %d (t_last = %u : t_now = %u);"
+				"i = %u\n", diff, t_last, t_now, i);
 			errors++;
 		}
 		t_last = t_now;
 	}
 
-	if (errors) {
-		TC_PRINT("errors = %d\n", errors);
-		rv = TC_FAIL;
-	} else {
-		TC_PRINT("Cycle results appear to be monotonic\n");
-	}
+	zassert_false(errors, "errors = %d\n", errors);
 
-	if (test_frequency()) {
-		rv = TC_FAIL;
-	}
-
-	TC_END_REPORT(rv);
+	zassert_false(test_frequency(), "test frequency failed");
 }
 
+void test_main(void)
+{
+	ztest_test_suite(test_timer_fn, ztest_unit_test(test_timer));
+	ztest_run_test_suite(test_timer_fn);
+}

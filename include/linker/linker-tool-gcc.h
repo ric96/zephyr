@@ -22,17 +22,19 @@
 #elif defined(CONFIG_X86)
 	#if  defined(__IAMCU)
 		OUTPUT_FORMAT("elf32-iamcu")
-		OUTPUT_ARCH(iamcu:intel)
+		OUTPUT_ARCH("iamcu:intel")
 	#else
 		OUTPUT_FORMAT("elf32-i386", "elf32-i386", "elf32-i386")
-		OUTPUT_ARCH(i386)
+		OUTPUT_ARCH("i386")
 	#endif
 #elif defined(CONFIG_NIOS2)
 	OUTPUT_FORMAT("elf32-littlenios2", "elf32-bignios2", "elf32-littlenios2")
 #elif defined(CONFIG_RISCV32)
-	OUTPUT_ARCH(riscv)
+	OUTPUT_ARCH("riscv")
 	OUTPUT_FORMAT("elf32-littleriscv")
 #elif defined(CONFIG_XTENSA)
+	/* Not needed */
+#elif defined(CONFIG_ARCH_POSIX)
 	/* Not needed */
 #else
 	#error Arch not supported.
@@ -51,7 +53,11 @@
  * description and tells the linker that this section is located in
  * the memory area specified by <where> argument.
  */
+#if defined(CONFIG_ARCH_POSIX)
+#define GROUP_LINK_IN(where)
+#else
 #define GROUP_LINK_IN(where) > where
+#endif
 
 /*
  * As GROUP_LINK_IN(), but takes a second argument indicating the
@@ -64,11 +70,15 @@
  * section, specifying the same memory region (e.g. "RAM") for both
  * vregion and lregion.
  */
+#if defined(CONFIG_ARCH_POSIX)
+#define GROUP_DATA_LINK_IN(vregion, lregion)
+#else
 #ifdef CONFIG_XIP
 #define GROUP_DATA_LINK_IN(vregion, lregion) > vregion AT> lregion
 #else
 #define GROUP_DATA_LINK_IN(vregion, lregion) > vregion
 #endif
+#endif /*CONFIG_ARCH_POSIX*/
 
 /*
  * The GROUP_FOLLOWS_AT() macro is located at the end of the section
@@ -76,7 +86,11 @@
  * it is to be loaded, but that it follows a section which did specify
  * such an address
  */
+#ifdef CONFIG_ARCH_POSIX
+#define GROUP_FOLLOWS_AT(where)
+#else
 #define GROUP_FOLLOWS_AT(where) AT > where
+#endif
 
 /*
  * The SECTION_PROLOGUE() macro is used to define the beginning of a section.

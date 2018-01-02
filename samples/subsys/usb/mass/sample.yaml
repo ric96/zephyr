@@ -1,11 +1,6 @@
 sample:
-  description: TBD
-  name: TBD
+  name: Mass Storage
 tests:
-  - test:
-      extra_configs:
-        - CONFIG_USB_DEVICE_VID=0xDEAD
-        - CONFIG_USB_DEVICE_PID=0xBEEF
-      build_only: true
-      platform_whitelist: arduino_101
-      tags: msd usb
+  test:
+    platform_whitelist: arduino_101
+    tags: msd usb

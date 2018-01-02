@@ -48,8 +48,48 @@ void configure_mpu_mem_domain(struct k_thread *thread)
 	arm_core_mpu_enable();
 }
 
+void _arch_mem_domain_configure(struct k_thread *thread)
+{
+	configure_mpu_mem_domain(thread);
+}
+
 int _arch_mem_domain_max_partitions_get(void)
 {
 	return arm_core_mpu_get_max_domain_partition_regions();
 }
+
+/*
+ * Reset MPU region for a single memory partition
+ */
+void _arch_mem_domain_partition_remove(struct k_mem_domain *domain,
+				       u32_t  partition_id)
+{
+	ARG_UNUSED(domain);
+
+	arm_core_mpu_disable();
+	arm_core_mpu_mem_partition_remove(partition_id);
+	arm_core_mpu_enable();
+
+}
+
+/*
+ * Destroy MPU regions for the mem domain
+ */
+void _arch_mem_domain_destroy(struct k_mem_domain *domain)
+{
+	ARG_UNUSED(domain);
+
+	arm_core_mpu_disable();
+	arm_core_mpu_configure_mem_domain(NULL);
+	arm_core_mpu_enable();
+}
+
+/*
+ * Validate the given buffer is user accessible or not
+ */
+int _arch_buffer_validate(void *addr, size_t size, int write)
+{
+	return arm_core_mpu_buffer_validate(addr, size, write);
+}
+
 #endif

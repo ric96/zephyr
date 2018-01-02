@@ -1,0 +1,7 @@
+sample:
+  name: Low Power state Sample for nrf52
+tests:
+  test:
+    platform_whitelist: nrf52_vbluno52 nrf52840_pca10056
+      nrf52_pca10040
+    tags: nrf52 samples power

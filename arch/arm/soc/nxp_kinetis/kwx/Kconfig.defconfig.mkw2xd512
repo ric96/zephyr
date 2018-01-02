@@ -34,9 +34,6 @@ config ADC_MCUX_ADC16
 
 endif # ADC
 
-config CLOCK_CONTROL
-	def_bool y
-
 if CLOCK_CONTROL
 
 config CLOCK_CONTROL_MCUX_SIM
@@ -82,12 +79,12 @@ config SPI_MCUX_DSPI
 
 endif # SPI
 
-if RANDOM_GENERATOR
+if ENTROPY_GENERATOR
 
-config RANDOM_MCUX_RNGA
+config ENTROPY_MCUX_RNGA
 	def_bool y
 
-endif # RANDOM_GENERATOR
+endif # ENTROPY_GENERATOR
 
 if FLASH
 

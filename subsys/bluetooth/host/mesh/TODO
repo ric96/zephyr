@@ -1,13 +1,13 @@
 Bluetooth Mesh implementation tasks
 ===================================
 
- * Friend support (work ongoing)
+ * Persistent storage support
 
- * PB-GATT (Node)
+ * Configuration & Health Clients (Configuration is partially done)
+
+ * Provisioner support
 
  * Any generally useful models from the Model Specification
-
- * Mesh shell
 
  * Find a way to overlay provisioning memory with network memory
    (linker magic?)

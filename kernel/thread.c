@@ -28,64 +28,6 @@
 extern struct _static_thread_data _static_thread_data_list_start[];
 extern struct _static_thread_data _static_thread_data_list_end[];
 
-#ifdef CONFIG_USERSPACE
-static int thread_count;
-
-/*
- * Fetch an unused thread ID. Returns -1 if all thread IDs are in use
- */
-static int get_next_thread_index(void)
-{
-	int key, pos = -1;
-
-	key = irq_lock();
-
-	if (thread_count == CONFIG_MAX_THREAD_BYTES * 8) {
-		/* We have run out of thread IDs! */
-		goto out;
-	}
-
-	/* find an unused bit in the kernel's bitfield of in-use thread IDs */
-	for (int i = 0; i < CONFIG_MAX_THREAD_BYTES; i++) {
-		int fs;
-
-		fs = find_lsb_set(_kernel.free_thread_ids[i]);
-		if (fs) {
-			/* find_lsb_set counts bit positions starting at 1 */
-			--fs;
-			_kernel.free_thread_ids[i] &= ~(1 << fs);
-			pos = fs + (i * 8);
-			break;
-		}
-	}
-
-	thread_count++;
-out:
-	irq_unlock(key);
-
-	return pos;
-}
-
-static void free_thread_index(int id)
-{
-	int index, key;
-	u8_t bit;
-
-	if (id == -1) {
-		return;
-	}
-
-	key = irq_lock();
-
-	thread_count--;
-	index = id / 8;
-	bit = 1 << (id % 8);
-	_kernel.free_thread_ids[index] |= bit;
-
-	irq_unlock(key);
-}
-#endif
-
 #define _FOREACH_STATIC_THREAD(thread_data)              \
 	for (struct _static_thread_data *thread_data =   \
 	     _static_thread_data_list_start;             \
@@ -127,6 +69,7 @@ int _is_thread_essential(void)
 	return _current->base.user_options & K_ESSENTIAL;
 }
 
+#if !defined(CONFIG_ARCH_HAS_CUSTOM_BUSY_WAIT)
 void k_busy_wait(u32_t usec_to_wait)
 {
 #if defined(CONFIG_TICKLESS_KERNEL) && \
@@ -154,6 +97,7 @@ int saved_always_on = k_enable_sys_clock_always_on();
 	_sys_clock_always_on = saved_always_on;
 #endif
 }
+#endif
 
 #ifdef CONFIG_THREAD_CUSTOM_DATA
 void _impl_k_thread_custom_data_set(void *value)
@@ -324,13 +268,24 @@ void _setup_new_thread(struct k_thread *new_thread,
 	_new_thread(new_thread, stack, stack_size, entry, p1, p2, p3,
 		    prio, options);
 #ifdef CONFIG_USERSPACE
-	new_thread->base.perm_index = get_next_thread_index();
 	_k_object_init(new_thread);
 	_k_object_init(stack);
 	new_thread->stack_obj = stack;
 
 	/* Any given thread has access to itself */
 	k_object_access_grant(new_thread, new_thread);
+
+#ifdef CONFIG_ARCH_HAS_CUSTOM_SWAP_TO_MAIN
+	/* _current may be null if the dummy thread is not used */
+	if (!_current) {
+		return;
+	}
+#endif
+	/* New threads inherit any memory domain membership by the parent */
+	if (_current->mem_domain_info.mem_domain) {
+		k_mem_domain_add_thread(_current->mem_domain_info.mem_domain,
+					new_thread);
+	}
 
 	if (options & K_INHERIT_PERMS) {
 		_thread_perms_inherit(_current, new_thread);
@@ -417,11 +372,6 @@ _SYSCALL_HANDLER(k_thread_create,
 			  (void *)margs->arg6, (void *)margs->arg7, prio,
 			  options);
 
-	if (new_thread->base.perm_index == -1) {
-		k_thread_abort(new_thread);
-		_SYSCALL_VERIFY_MSG(0, "too many threads created");
-	}
-
 	if (delay != K_FOREVER) {
 		schedule_new_thread(new_thread, delay);
 	}
@@ -454,45 +404,6 @@ int _impl_k_thread_cancel(k_tid_t tid)
 #ifdef CONFIG_USERSPACE
 _SYSCALL_HANDLER1_SIMPLE(k_thread_cancel, K_OBJ_THREAD, struct k_thread *);
 #endif
-
-static inline int is_in_any_group(struct _static_thread_data *thread_data,
-				  u32_t groups)
-{
-	return !!(thread_data->init_groups & groups);
-}
-
-void _k_thread_group_op(u32_t groups, void (*func)(struct k_thread *))
-{
-	unsigned int  key;
-
-	__ASSERT(!_is_in_isr(), "");
-
-	_sched_lock();
-
-	/* Invoke func() on each static thread in the specified group set. */
-
-	_FOREACH_STATIC_THREAD(thread_data) {
-		if (is_in_any_group(thread_data, groups)) {
-			key = irq_lock();
-			func(thread_data->init_thread);
-			irq_unlock(key);
-		}
-	}
-
-	/*
-	 * If the current thread is still in a ready state, then let the
-	 * "unlock scheduler" code determine if any rescheduling is needed.
-	 */
-	if (_is_thread_ready(_current)) {
-		k_sched_unlock();
-		return;
-	}
-
-	/* The current thread is no longer in a ready state--reschedule. */
-	key = irq_lock();
-	_sched_unlock_no_reschedule();
-	_Swap(key);
-}
 
 void _k_thread_single_start(struct k_thread *thread)
 {
@@ -577,15 +488,11 @@ void _k_thread_single_abort(struct k_thread *thread)
 	/* Clear initailized state so that this thread object may be re-used
 	 * and triggers errors if API calls are made on it from user threads
 	 */
-	_k_object_uninit(thread);
 	_k_object_uninit(thread->stack_obj);
+	_k_object_uninit(thread);
 
-	if (thread->base.perm_index != -1) {
-		free_thread_index(thread->base.perm_index);
-
-		/* Revoke permissions on thread's ID so that it may be recycled */
-		_thread_perms_all_clear(thread);
-	}
+	/* Revoke permissions on thread's ID so that it may be recycled */
+	_thread_perms_all_clear(thread);
 #endif
 }
 
@@ -669,27 +576,6 @@ void _init_thread_base(struct _thread_base *thread_base, int priority,
 	/* swap_data does not need to be initialized */
 
 	_init_thread_timeout(thread_base);
-}
-
-u32_t _k_thread_group_mask_get(struct k_thread *thread)
-{
-	struct _static_thread_data *thread_data = thread->init_data;
-
-	return thread_data->init_groups;
-}
-
-void _k_thread_group_join(u32_t groups, struct k_thread *thread)
-{
-	struct _static_thread_data *thread_data = thread->init_data;
-
-	thread_data->init_groups |= groups;
-}
-
-void _k_thread_group_leave(u32_t groups, struct k_thread *thread)
-{
-	struct _static_thread_data *thread_data = thread->init_data;
-
-	thread_data->init_groups &= groups;
 }
 
 void k_thread_access_grant(struct k_thread *thread, ...)

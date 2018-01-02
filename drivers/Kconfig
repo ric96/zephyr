@@ -30,7 +30,7 @@ source "drivers/interrupt_controller/Kconfig"
 
 source "drivers/timer/Kconfig"
 
-source "drivers/random/Kconfig"
+source "drivers/entropy/Kconfig"
 
 source "drivers/grove/Kconfig"
 
@@ -75,5 +75,7 @@ source "drivers/usb/Kconfig"
 source "drivers/crypto/Kconfig"
 
 source "drivers/display/Kconfig"
+
+source "drivers/led_strip/Kconfig"
 
 endmenu

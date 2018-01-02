@@ -112,6 +112,13 @@ enum sensor_channel {
 	SENSOR_CHAN_BLUE,
 	/** Altitude, in meters */
 	SENSOR_CHAN_ALTITUDE,
+
+	/** 1.0 micro-meters Particulate Matter, in ug/m^3 */
+	SENSOR_CHAN_PM_1_0,
+	/** 2.5 micro-meters Particulate Matter, in ug/m^3 */
+	SENSOR_CHAN_PM_2_5,
+	/** 10 micro-meters Particulate Matter, in ug/m^3 */
+	SENSOR_CHAN_PM_10,
 	/** All channels. */
 	SENSOR_CHAN_ALL,
 };
@@ -287,8 +294,8 @@ static inline int _impl_sensor_attr_set(struct device *dev,
 /**
  * @brief Activate a sensor's trigger and set the trigger handler
  *
- * The handler will be called from a fiber, so I2C or SPI operations are
- * safe.  However, the fiber's stack is limited and defined by the
+ * The handler will be called from a thread, so I2C or SPI operations are
+ * safe.  However, the thread's stack is limited and defined by the
  * driver.  It is currently up to the caller to ensure that the handler
  * does not overflow the stack.
  *

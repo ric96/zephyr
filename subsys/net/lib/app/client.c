@@ -285,6 +285,47 @@ static void close_net_ctx(struct net_app_ctx *ctx)
 #endif
 }
 
+static int bind_local(struct net_app_ctx *ctx)
+{
+	int ret = 0;
+
+#if defined(CONFIG_NET_IPV4)
+	if (ctx->ipv4.remote.sa_family == AF_INET && ctx->ipv4.ctx) {
+		ctx->ipv4.local.sa_family = AF_INET;
+		_net_app_set_local_addr(&ctx->ipv4.local, NULL,
+					net_sin(&ctx->ipv4.local)->sin_port);
+
+		ret = _net_app_set_net_ctx(ctx, ctx->ipv4.ctx,
+					   &ctx->ipv4.local,
+					   sizeof(struct sockaddr_in),
+					   ctx->proto);
+		if (ret < 0) {
+			net_context_put(ctx->ipv4.ctx);
+			ctx->ipv4.ctx = NULL;
+		}
+	}
+#endif
+
+#if defined(CONFIG_NET_IPV6)
+	if (ctx->ipv6.remote.sa_family == AF_INET6 && ctx->ipv6.ctx) {
+		ctx->ipv6.local.sa_family = AF_INET6;
+		_net_app_set_local_addr(&ctx->ipv6.local, NULL,
+				       net_sin6(&ctx->ipv6.local)->sin6_port);
+
+		ret = _net_app_set_net_ctx(ctx, ctx->ipv6.ctx,
+					   &ctx->ipv6.local,
+					   sizeof(struct sockaddr_in6),
+					   ctx->proto);
+		if (ret < 0) {
+			net_context_put(ctx->ipv6.ctx);
+			ctx->ipv6.ctx = NULL;
+		}
+	}
+#endif
+
+	return ret;
+}
+
 int net_app_init_client(struct net_app_ctx *ctx,
 			enum net_sock_type sock_type,
 			enum net_ip_protocol proto,
@@ -366,6 +407,7 @@ int net_app_init_client(struct net_app_ctx *ctx,
 	ctx->recv_cb = _net_app_received;
 	ctx->proto = proto;
 	ctx->sock_type = sock_type;
+	ctx->is_enabled = true;
 
 	ret = _net_app_config_local_ctx(ctx, sock_type, proto, &addr);
 	if (ret < 0) {
@@ -418,39 +460,10 @@ int net_app_init_client(struct net_app_ctx *ctx,
 		return -EPFNOSUPPORT;
 	}
 
-#if defined(CONFIG_NET_IPV4)
-	if (ctx->ipv4.remote.sa_family == AF_INET) {
-		ctx->ipv4.local.sa_family = AF_INET;
-		_net_app_set_local_addr(&ctx->ipv4.local, NULL,
-					net_sin(&ctx->ipv4.local)->sin_port);
-
-		ret = _net_app_set_net_ctx(ctx, ctx->ipv4.ctx,
-					   &ctx->ipv4.local,
-					   sizeof(struct sockaddr_in),
-					   ctx->proto);
-		if (ret < 0) {
-			net_context_put(ctx->ipv4.ctx);
-			ctx->ipv4.ctx = NULL;
-		}
+	ret = bind_local(ctx);
+	if (ret < 0) {
+		goto fail;
 	}
-#endif
-
-#if defined(CONFIG_NET_IPV6)
-	if (ctx->ipv6.remote.sa_family == AF_INET6) {
-		ctx->ipv6.local.sa_family = AF_INET6;
-		_net_app_set_local_addr(&ctx->ipv6.local, NULL,
-				       net_sin6(&ctx->ipv6.local)->sin6_port);
-
-		ret = _net_app_set_net_ctx(ctx, ctx->ipv6.ctx,
-					   &ctx->ipv6.local,
-					   sizeof(struct sockaddr_in6),
-					   ctx->proto);
-		if (ret < 0) {
-			net_context_put(ctx->ipv6.ctx);
-			ctx->ipv6.ctx = NULL;
-		}
-	}
-#endif
 
 	_net_app_print_info(ctx);
 
@@ -469,6 +482,7 @@ static void _app_connected(struct net_context *net_ctx,
 			   void *user_data)
 {
 	struct net_app_ctx *ctx = user_data;
+	int ret;
 
 #if defined(CONFIG_NET_APP_TLS) || defined(CONFIG_NET_APP_DTLS)
 	if (ctx->is_tls) {
@@ -476,7 +490,10 @@ static void _app_connected(struct net_context *net_ctx,
 	}
 #endif
 
-	net_context_recv(net_ctx, ctx->recv_cb, K_NO_WAIT, ctx);
+	ret = net_context_recv(net_ctx, ctx->recv_cb, K_NO_WAIT, ctx);
+	if (ret < 0) {
+		NET_DBG("Cannot set recv_cb (%d)", ret);
+	}
 
 #if defined(CONFIG_NET_APP_TLS) || defined(CONFIG_NET_APP_DTLS)
 	if (ctx->is_tls) {
@@ -578,6 +595,54 @@ out:
 }
 #endif /* CONFIG_NET_APP_DTLS */
 
+static void check_local_address(struct net_app_ctx *ctx,
+				struct net_context *net_ctx)
+{
+#if defined(CONFIG_NET_IPV6)
+	if (net_context_get_family(net_ctx) == AF_INET6) {
+		const struct in6_addr *laddr;
+		struct in6_addr *raddr;
+
+		laddr = &net_sin6(&ctx->ipv6.local)->sin6_addr;
+		if (!net_is_ipv6_addr_unspecified(laddr)) {
+			return;
+		}
+
+		raddr = &net_sin6(&ctx->ipv6.remote)->sin6_addr;
+
+		laddr = net_if_ipv6_select_src_addr(NULL, raddr);
+		if (laddr && laddr != net_ipv6_unspecified_address()) {
+			net_ipaddr_copy(&net_sin6(&ctx->ipv6.local)->sin6_addr,
+					laddr);
+		} else {
+			NET_WARN("Source address is unspecified!");
+		}
+	}
+#endif
+
+#if defined(CONFIG_NET_IPV4)
+	if (net_context_get_family(net_ctx) == AF_INET) {
+		struct in_addr *laddr;
+		struct net_if *iface;
+
+		laddr = &net_sin(&ctx->ipv4.local)->sin_addr;
+		if (!net_is_ipv4_addr_unspecified(laddr)) {
+			return;
+		}
+
+		/* Just take the first IPv4 address of an interface */
+		iface = net_context_get_iface(net_ctx);
+		if (iface) {
+			laddr = &iface->ipv4.unicast[0].address.in_addr;
+			net_ipaddr_copy(&net_sin(&ctx->ipv4.local)->sin_addr,
+					laddr);
+		} else {
+			NET_WARN("Source address is unspecified!");
+		}
+	}
+#endif
+}
+
 int net_app_connect(struct net_app_ctx *ctx, s32_t timeout)
 {
 	struct net_context *net_ctx;
@@ -597,8 +662,36 @@ int net_app_connect(struct net_app_ctx *ctx, s32_t timeout)
 	}
 
 	net_ctx = _net_app_select_net_ctx(ctx, NULL);
-	if (!net_ctx) {
+	if (!net_ctx && ctx->is_enabled) {
 		return -EAFNOSUPPORT;
+	}
+
+	if (!ctx->is_enabled) {
+		ret = _net_app_config_local_ctx(ctx, ctx->sock_type,
+						ctx->proto, NULL);
+		if (ret < 0) {
+			NET_DBG("Cannot get local endpoint (%d)", ret);
+			return -EINVAL;
+		}
+
+		net_ctx = _net_app_select_net_ctx(ctx, NULL);
+
+		NET_DBG("Re-conncting to net_ctx %p", net_ctx);
+
+		ret = bind_local(ctx);
+		if (ret < 0) {
+			NET_DBG("Cannot bind local endpoint (%d)", ret);
+			return -EINVAL;
+		}
+
+		ctx->is_enabled = true;
+
+		_net_app_print_info(ctx);
+	} else {
+		/* We cannot bind to local unspecified address when sending.
+		 * Select proper address depending on remote one in this case.
+		 */
+		check_local_address(ctx, net_ctx);
 	}
 
 #if defined(CONFIG_NET_APP_TLS) || defined(CONFIG_NET_APP_DTLS)
@@ -682,15 +775,32 @@ static void tls_client_handler(struct net_app_ctx *ctx,
 
 	k_sem_give(startup_sync);
 
-	/* We wait until TLS connection is established */
-	k_sem_take(&ctx->client.connect_wait, K_FOREVER);
+	while (1) {
+		/* We wait until TLS connection is established */
+		k_sem_take(&ctx->client.connect_wait, K_FOREVER);
 
-	ret = _net_app_ssl_mainloop(ctx);
-	if (ret < 0) {
-		NET_ERR("TLS mainloop startup failed (%d)", ret);
+		ret = _net_app_ssl_mainloop(ctx);
+		if (ctx->tls.connection_closing) {
+			mbedtls_ssl_close_notify(&ctx->tls.mbedtls.ssl);
+
+			if (ctx->cb.close) {
+				ctx->cb.close(ctx, -ESHUTDOWN, ctx->user_data);
+			}
+
+			ctx->tls.connection_closing = false;
+			ctx->is_enabled = false;
+
+			/* Wait more connection requests from user */
+			continue;
+		}
+
+		if (ret < 0) {
+			NET_ERR("TLS mainloop startup failed (%d)", ret);
+			break;
+		}
 	}
 
-	mbedtls_ssl_close_notify(&ctx->tls.mbedtls.ssl);
+	NET_DBG("Shutting down TLS handler");
 
 	/* If there is any pending data that have not been processed
 	 * yet, we need to free it here.

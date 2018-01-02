@@ -172,7 +172,7 @@ static void uart_stm32_irq_err_enable(struct device *dev)
 	/* Enable FE, ORE interruptions */
 	LL_USART_EnableIT_ERROR(UartInstance);
 	/* Enable Line break detection */
-#ifndef CONFIG_SOC_STM32F030X8
+#ifndef CONFIG_SOC_SERIES_STM32F0X
 	LL_USART_EnableIT_LBD(UartInstance);
 #endif
 	/* Enable parity error interruption */
@@ -186,7 +186,7 @@ static void uart_stm32_irq_err_disable(struct device *dev)
 	/* Enable FE, ORE interruptions */
 	LL_USART_DisableIT_ERROR(UartInstance);
 	/* Enable Line break detection */
-#ifndef CONFIG_SOC_STM32F030X8
+#ifndef CONFIG_SOC_SERIES_STM32F0X
 	LL_USART_DisableIT_LBD(UartInstance);
 #endif
 	/* Enable parity error interruption */
@@ -197,8 +197,10 @@ static int uart_stm32_irq_is_pending(struct device *dev)
 {
 	USART_TypeDef *UartInstance = UART_STRUCT(dev);
 
-	return (LL_USART_IsActiveFlag_RXNE(UartInstance) ||
-		LL_USART_IsActiveFlag_TXE(UartInstance));
+	return ((LL_USART_IsActiveFlag_RXNE(UartInstance) &&
+		 LL_USART_IsEnabledIT_RXNE(UartInstance)) ||
+		(LL_USART_IsActiveFlag_TXE(UartInstance) &&
+		 LL_USART_IsEnabledIT_TXE(UartInstance)));
 }
 
 static int uart_stm32_irq_update(struct device *dev)

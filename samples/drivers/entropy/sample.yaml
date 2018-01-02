@@ -1,0 +1,6 @@
+sample:
+  name: Sample for the entropy gathering driver
+tests:
+  test:
+    tags: samples
+    filter: CONFIG_ENTROPY_HAS_DRIVER

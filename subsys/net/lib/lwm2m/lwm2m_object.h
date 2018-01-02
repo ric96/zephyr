@@ -204,21 +204,34 @@ struct lwm2m_engine_obj_inst {
 };
 
 struct lwm2m_output_context {
-	struct coap_packet *out_cpkt;
-	u8_t writer_flags;	/* flags for reader/writer */
-	u8_t *outbuf;
-	u16_t outsize;
-	u32_t outlen;
-	u8_t mark_pos_ri;	/* mark pos for last resource instance */
 	const struct lwm2m_writer *writer;
+	struct coap_packet *out_cpkt;
+
+	/* current write position in net_buf chain */
+	struct net_buf *frag;
+	u16_t offset;
+
+	/* markers for last resource inst */
+	struct net_buf *mark_frag_ri;
+	u16_t mark_pos_ri;
+
+	/* flags for reader/writer */
+	u8_t writer_flags;
 };
 
 struct lwm2m_input_context {
-	struct coap_packet *in_cpkt;
-	u8_t *inbuf;
-	u16_t insize;
-	s32_t inpos;
 	const struct lwm2m_reader *reader;
+	struct coap_packet *in_cpkt;
+
+	/* current read position in net_buf chain */
+	struct net_buf *frag;
+	u16_t offset;
+
+	/* length of incoming coap/lwm2m payload */
+	u16_t payload_len;
+
+	/* length of incoming opaque */
+	u16_t opaque_len;
 };
 
 /* LWM2M format writer for the various formats supported */
@@ -255,6 +268,9 @@ struct lwm2m_writer {
 	size_t (*put_bool)(struct lwm2m_output_context *out,
 			   struct lwm2m_obj_path *path,
 			   bool value);
+	size_t (*put_opaque)(struct lwm2m_output_context *out,
+			     struct lwm2m_obj_path *path,
+			     char *buf, size_t buflen);
 };
 
 struct lwm2m_reader {
@@ -270,6 +286,8 @@ struct lwm2m_reader {
 				 float64_value_t *value);
 	size_t (*get_bool)(struct lwm2m_input_context *in,
 			   bool *value);
+	size_t (*get_opaque)(struct lwm2m_input_context *in,
+			     u8_t *buf, size_t buflen, bool *last_block);
 };
 
 /* LWM2M engine context */
@@ -378,6 +396,17 @@ static inline size_t engine_put_bool(struct lwm2m_output_context *out,
 	return out->writer->put_bool(out, path, value);
 }
 
+static inline size_t engine_put_opaque(struct lwm2m_output_context *out,
+				       struct lwm2m_obj_path *path,
+				       char *buf, size_t buflen)
+{
+	if (out->writer->put_opaque) {
+		return out->writer->put_opaque(out, path, buf, buflen);
+	}
+
+	return 0;
+}
+
 static inline size_t engine_get_s32(struct lwm2m_input_context *in,
 				    s32_t *value)
 {
@@ -412,6 +441,17 @@ static inline size_t engine_get_bool(struct lwm2m_input_context *in,
 				     bool *value)
 {
 	return in->reader->get_bool(in, value);
+}
+
+static inline size_t engine_get_opaque(struct lwm2m_input_context *in,
+				       u8_t *buf, size_t buflen,
+				       bool *last_block)
+{
+	if (in->reader->get_opaque) {
+		return in->reader->get_opaque(in, buf, buflen, last_block);
+	}
+
+	return 0;
 }
 
 #endif /* LWM2M_OBJECT_H_ */

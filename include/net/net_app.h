@@ -51,6 +51,7 @@ extern "C" {
 /**
  * @brief Network application library
  * @defgroup net_app Network Application Library
+ * @ingroup networking
  * @{
  */
 
@@ -387,15 +388,21 @@ struct net_app_ctx {
 		} mbedtls;
 
 		/** Have we called connect cb yet? */
-		bool connect_cb_called;
+		u8_t connect_cb_called : 1;
 
 		/** User wants to close the connection */
-		bool close_requested;
+		u8_t close_requested : 1;
 
 		/** Is there TX pending? If there is then the close operation
 		 * will be postponed after we have sent the data.
 		 */
-		bool tx_pending;
+		u8_t tx_pending : 1;
+
+		/** Is the TLS/DTLS handshake fully done */
+		u8_t handshake_done : 1;
+
+		/** Is the connection closing */
+		u8_t connection_closing : 1;
 	} tls;
 #endif /* CONFIG_NET_APP_TLS || CONFIG_NET_APP_DTLS */
 

@@ -108,7 +108,8 @@ static void zsock_accepted_cb(struct net_context *new_ctx,
 			      int status, void *user_data) {
 	struct net_context *parent = user_data;
 
-	net_context_recv(new_ctx, zsock_received_cb, K_NO_WAIT, NULL);
+	/* This just installs a callback, so cannot fail. */
+	(void)net_context_recv(new_ctx, zsock_received_cb, K_NO_WAIT, NULL);
 	k_fifo_init(&new_ctx->recv_q);
 
 	NET_DBG("parent=%p, ctx=%p, st=%d", parent, new_ctx, status);
@@ -205,7 +206,17 @@ int zsock_accept(int sock, struct sockaddr *addr, socklen_t *addrlen)
 		int len = min(*addrlen, sizeof(ctx->remote));
 
 		memcpy(addr, &ctx->remote, len);
-		*addrlen = sizeof(ctx->remote);
+		/* addrlen is a value-result argument, set to actual
+		 * size of source address
+		 */
+		if (ctx->remote.sa_family == AF_INET) {
+			*addrlen = sizeof(struct sockaddr_in);
+		} else if (ctx->remote.sa_family == AF_INET6) {
+			*addrlen = sizeof(struct sockaddr_in6);
+		} else {
+			errno = ENOTSUP;
+			return -1;
+		}
 	}
 
 	/* TODO: Ensure non-negative */
@@ -224,7 +235,6 @@ ssize_t zsock_sendto(int sock, const void *buf, size_t len, int flags,
 	struct net_pkt *send_pkt;
 	s32_t timeout = K_FOREVER;
 	struct net_context *ctx = INT_TO_POINTER(sock);
-	size_t max_len = net_if_get_mtu(net_context_get_iface(ctx));
 
 	ARG_UNUSED(flags);
 
@@ -238,18 +248,6 @@ ssize_t zsock_sendto(int sock, const void *buf, size_t len, int flags,
 		return -1;
 	}
 
-	/* Make sure we don't send more data in one packet than
-	 * MTU allows. Optimize for number of branches in the code.
-	 */
-	max_len -= NET_IPV4TCPH_LEN;
-	if (net_context_get_family(ctx) != AF_INET) {
-		max_len -= NET_IPV6TCPH_LEN - NET_IPV4TCPH_LEN;
-	}
-
-	if (len > max_len) {
-		len = max_len;
-	}
-
 	len = net_pkt_append(send_pkt, len, buf, timeout);
 	if (!len) {
 		net_pkt_unref(send_pkt);
@@ -260,7 +258,12 @@ ssize_t zsock_sendto(int sock, const void *buf, size_t len, int flags,
 	/* Register the callback before sending in order to receive the response
 	 * from the peer.
 	 */
-	SET_ERRNO(net_context_recv(ctx, zsock_received_cb, K_NO_WAIT, NULL));
+	err = net_context_recv(ctx, zsock_received_cb, K_NO_WAIT, NULL);
+	if (err < 0) {
+		net_pkt_unref(send_pkt);
+		errno = -err;
+		return -1;
+	}
 
 	if (dest_addr) {
 		err = net_context_sendto(send_pkt, dest_addr, addrlen, NULL,
@@ -300,7 +303,8 @@ static inline ssize_t zsock_recv_stream(struct net_context *ctx,
 		}
 
 		res = _k_fifo_wait_non_empty(&ctx->recv_q, timeout);
-		if (res && res != -EAGAIN) {
+		/* EAGAIN when timeout expired, EINTR when cancelled */
+		if (res && res != -EAGAIN && res != -EINTR) {
 			errno = -res;
 			return -1;
 		}
@@ -388,6 +392,18 @@ ssize_t zsock_recvfrom(int sock, void *buf, size_t max_len, int flags,
 			rv = net_pkt_get_src_addr(pkt, src_addr, *addrlen);
 			if (rv < 0) {
 				errno = rv;
+				return -1;
+			}
+
+			/* addrlen is a value-result argument, set to actual
+			 * size of source address
+			 */
+			if (src_addr->sa_family == AF_INET) {
+				*addrlen = sizeof(struct sockaddr_in);
+			} else if (src_addr->sa_family == AF_INET6) {
+				*addrlen = sizeof(struct sockaddr_in6);
+			} else {
+				errno = ENOTSUP;
 				return -1;
 			}
 		}

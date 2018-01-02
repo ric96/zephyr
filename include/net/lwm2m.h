@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2017 Linaro Limited
+ * Copyright (c) 2017 Open Source Foundries Limited.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -56,11 +57,27 @@ struct lwm2m_ctx {
 	struct coap_pending pendings[CONFIG_LWM2M_ENGINE_MAX_PENDING];
 	struct coap_reply replies[CONFIG_LWM2M_ENGINE_MAX_REPLIES];
 	struct k_delayed_work retransmit_work;
+
+#if defined(CONFIG_NET_APP_DTLS)
+	/** Pre-Shared Key  Information*/
+	unsigned char *client_psk;
+	size_t client_psk_len;
+	char *client_psk_id;
+	size_t client_psk_id_len;
+
+	/** DTLS support structures */
+	char *cert_host;
+	u8_t *dtls_result_buf;
+	size_t dtls_result_buf_len;
+	struct k_mem_pool *dtls_pool;
+	k_thread_stack_t *dtls_stack;
+	size_t dtls_stack_len;
+#endif
 };
 
-/* callback can return 1 if handled (don't update value) */
 typedef void *(*lwm2m_engine_get_data_cb_t)(u16_t obj_inst_id,
 				       size_t *data_len);
+/* callbacks return 0 on success and error code otherwise */
 typedef int (*lwm2m_engine_set_data_cb_t)(u16_t obj_inst_id,
 				       u8_t *data, u16_t data_len,
 				       bool last_block, size_t total_size);
@@ -153,6 +170,7 @@ typedef struct float64_value {
 
 int lwm2m_engine_create_obj_inst(char *pathstr);
 
+int lwm2m_engine_set_opaque(char *pathstr, char *data_ptr, u16_t data_len);
 int lwm2m_engine_set_string(char *path, char *data_ptr);
 int lwm2m_engine_set_u8(char *path, u8_t value);
 int lwm2m_engine_set_u16(char *path, u16_t value);
@@ -166,6 +184,7 @@ int lwm2m_engine_set_bool(char *path, bool value);
 int lwm2m_engine_set_float32(char *pathstr, float32_value_t *value);
 int lwm2m_engine_set_float64(char *pathstr, float64_value_t *value);
 
+int lwm2m_engine_get_opaque(char *pathstr, void *buf, u16_t buflen);
 int lwm2m_engine_get_string(char *path, void *str, u16_t strlen);
 u8_t  lwm2m_engine_get_u8(char *path);
 u16_t lwm2m_engine_get_u16(char *path);

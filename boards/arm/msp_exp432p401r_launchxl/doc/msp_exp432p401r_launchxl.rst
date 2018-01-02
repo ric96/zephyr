@@ -51,7 +51,7 @@ The MSP-EXP432P401R LaunchXL development board configuration supports the follow
 | UART      | on-chip    | serial port           |
 +-----------+------------+-----------------------+
 
-More details about the supported periperals are available in `MSP432P4XX TRM`_
+More details about the supported peripherals are available in `MSP432P4XX TRM`_
 Other hardware features are not currently supported by the Zephyr kernel.
 
 Building and Flashing
@@ -63,14 +63,16 @@ Building
 Follow the :ref:`getting_started` instructions for Zephyr application
 development.
 
-To build for the MSP-EXP432P401R LaunchXL:
+For example, to build the :ref:`hello_world` application for the
+MSP-EXP432P401R LaunchXL:
 
-.. code-block:: console
+.. zephyr-app-commands::
+   :zephyr-app: samples/hello_world
+   :board: msp_exp432p401r_launchxl
+   :goals: build
 
-	$ make -C samples/hello_world BOARD=msp_exp432p401r_launchxl
-
-The resulting ``zephyr.elf`` binary can be flashed onto MSP-EXP432P401R LaunchXL
-using the command line utility mentioned below.
+The resulting ``zephyr.elf`` binary in the build directory can be flashed onto
+MSP-EXP432P401R LaunchXL using the command line utility mentioned below.
 
 Flashing
 ========

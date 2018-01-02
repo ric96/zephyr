@@ -57,6 +57,9 @@ boards/x86/galileo/*                     @nashif
 boards/x86/quark_d2000_crb/*             @nashif
 boards/x86/quark_se_c1000_devboard/*     @nashif
 boards/xtensa/*                          @andrewboie
+# All cmake related files
+cmake/*                                  @nashif @SebastianBoe
+CMakeLists.txt                           @nashif @SebastianBoe
 doc/*                                    @dbkinder
 doc/subsystems/bluetooth/*               @sjanc @jhedberg @Vudentz
 drivers/*/*qmsi*                         @nashif
@@ -65,6 +68,7 @@ drivers/bluetooth/*                      @sjanc @jhedberg @Vudentz
 drivers/clock_control/*stm32f4*          @rsalveti @idlethread
 drivers/ethernet/*                       @jukkar @tbursztyka
 drivers/flash/*                          @nashif
+drivers/flash/*stm32*                    @superna9999
 drivers/gpio/*stm32*                     @rsalveti @idlethread
 drivers/gpio/gpio_pulpino.c              @fractalclone
 drivers/ieee802154/*                     @jukkar @tbursztyka

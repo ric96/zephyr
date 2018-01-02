@@ -1,8 +1,12 @@
 sample:
-  description: TBD
-  name: TBD
+  description: An example to illustrate the usage of
+    crypto APIs
+  name: Crypto APIs
+common:
+  tags: crypto
+  harness: console
 tests:
-  - test-micro:
-      build_only: true
-      platform_whitelist: qemu_x86
-      tags: crypto
+  test-mbedtls:
+    extra_args: CONF_FILE=prj_mtls_shim.conf
+  test-micro:
+    tags: micro

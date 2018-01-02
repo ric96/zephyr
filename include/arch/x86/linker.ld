@@ -65,10 +65,24 @@
 SECTIONS
 	{
 	GROUP_START(ROMABLE_REGION)
+#ifdef CONFIG_JAILHOUSE
+	/* 16-bit sections */
+	. = PHYS_RAM_ADDR;
+
+	SECTION_PROLOGUE(boot, (OPTIONAL),)
+	{
+	*(.boot)
+	. = ALIGN(16);
+	} GROUP_LINK_IN(ROMABLE_REGION)
+#endif
+	. = ALIGN(8);
 
 	_image_rom_start = PHYS_LOAD_ADDR;
+#ifndef CONFIG_JAILHOUSE
 	_image_text_start = PHYS_LOAD_ADDR;
-
+#else
+	_image_text_start = .;
+#endif
 	SECTION_PROLOGUE(_TEXT_SECTION_NAME, (OPTIONAL),)
 	{
 	. = CONFIG_TEXT_SECTION_OFFSET;
@@ -180,6 +194,16 @@ SECTIONS
 	SECTION_PROLOGUE(_BSS_SECTION_NAME, (NOLOAD OPTIONAL),)
 	{
 	/*
+	 * Without Jailhouse, we get the page alignment here for free by
+	 * definition of the beginning of the "RAMable" region on the board
+	 * configurations. With Jailhouse, everything falls in RAM and we
+	 * try to glue sections in sequence, thus we have to realign here so
+	 * that gen_mmu.py does not complain.
+	 */
+#ifdef CONFIG_JAILHOUSE
+	MMU_PAGE_ALIGN
+#endif
+	/*
 	 * For performance, BSS section is forced to be both 4 byte aligned and
 	 * a multiple of 4 bytes.
 	 */
@@ -241,16 +265,13 @@ SECTIONS
 	KEEP(*(gdt_ram_data))
 #else /* LINKER_PASS2 */
 
-#ifdef CONFIG_X86_STACK_PROTECTION
-    #ifdef CONFIG_X86_USERSPACE
-        #define GDT_NUM_ENTRIES 7
-    #else
-        #define GDT_NUM_ENTRIES	5
-    #endif /* CONFIG_X86_USERSPACE */
-#else /* CONFIG_X86_STACK_PROTECTION */
+#ifdef CONFIG_USERSPACE
+    #define GDT_NUM_ENTRIES 7
+#elif defined(CONFIG_HW_STACK_PROTECTION)
+    #define GDT_NUM_ENTRIES 5
+#else
     #define GDT_NUM_ENTRIES 3
-#endif /* CONFIG_X86_STACK_PROTECTION */
-
+#endif /* CONFIG_X86_USERSPACE */
 	. += GDT_NUM_ENTRIES * 8;
 #endif /* LINKER_PASS2 */
 #endif /* CONFIG_GDT_DYNAMIC */
@@ -312,7 +333,7 @@ SECTIONS
 	/* Memory management unit*/
 	SECTION_PROLOGUE(mmulist, (OPTIONAL),)
 	{
-	/* get size of the mmu lists needed for gen_mmu.py*/
+	/* get size of the mmu lists needed for gen_mmu_x86.py*/
 	LONG((__MMU_LIST_END__ - __MMU_LIST_START__) / __MMU_REGION_SIZEOF)
 	/* Get the start of mmu tables in data section so that the address
 	 * of the page tables can be calculated.

@@ -63,17 +63,14 @@ static void tcp_received(struct net_context *context,
 	case STATE_COMPLETED:
 		printk(TAG "New session started\n");
 		zperf_reset_session_stats(session);
-		session->start_time =  sys_cycle_get_32();
+		session->start_time = k_cycle_get_32();
 		session->state = STATE_ONGOING;
 		/* fall through */
 	case STATE_ONGOING:
 		session->counter++;
+		session->length += net_pkt_appdatalen(pkt);
 
-		if (pkt) {
-			session->length += net_pkt_appdatalen(pkt);
-		}
-
-		if (!pkt && status == 0) { /* EOF */
+		if (status == 0) { /* EOF */
 			u32_t rate_in_kbps;
 			u32_t duration = HW_CYCLES_TO_USEC(
 				time_delta(session->start_time, time));

@@ -42,14 +42,17 @@ struct i2c_stm32_data {
 	} current;
 };
 
-s32_t stm32_i2c_msg_write(struct device *dev, struct i2c_msg *msg, u32_t flg,
+s32_t stm32_i2c_msg_write(struct device *dev, struct i2c_msg *msg, u8_t *flg,
 			  u16_t sadr);
-s32_t stm32_i2c_msg_read(struct device *dev, struct i2c_msg *msg, u32_t flg,
+s32_t stm32_i2c_msg_read(struct device *dev, struct i2c_msg *msg, u8_t *flg,
 			 u16_t sadr);
 s32_t stm32_i2c_configure_timing(struct device *dev, u32_t clk);
 
 void stm32_i2c_event_isr(void *arg);
 void stm32_i2c_error_isr(void *arg);
+#ifdef CONFIG_I2C_STM32_COMBINED_INTERRUPT
+void stm32_i2c_combined_isr(void *arg);
+#endif
 
 #define DEV_DATA(dev) ((struct i2c_stm32_data * const)(dev)->driver_data)
 #define DEV_CFG(dev)	\

@@ -49,16 +49,10 @@ const char *otype_to_str(enum k_objects otype)
 		return "adc driver";
 	case K_OBJ_DRIVER_AIO_CMP:
 		return "aio comparator driver";
-	case K_OBJ_DRIVER_CLOCK_CONTROL:
-		return "clock control driver";
 	case K_OBJ_DRIVER_COUNTER:
 		return "counter driver";
 	case K_OBJ_DRIVER_CRYPTO:
 		return "crypto driver";
-	case K_OBJ_DRIVER_DMA:
-		return "dma driver";
-	case K_OBJ_DRIVER_ETH:
-		return "ethernet driver";
 	case K_OBJ_DRIVER_FLASH:
 		return "flash driver";
 	case K_OBJ_DRIVER_GPIO:
@@ -73,20 +67,16 @@ const char *otype_to_str(enum k_objects otype)
 		return "pinmux driver";
 	case K_OBJ_DRIVER_PWM:
 		return "pwm driver";
-	case K_OBJ_DRIVER_RANDOM:
-		return "random driver";
+	case K_OBJ_DRIVER_ENTROPY:
+		return "entropy driver";
 	case K_OBJ_DRIVER_RTC:
 		return "realtime clock driver";
 	case K_OBJ_DRIVER_SENSOR:
 		return "sensor driver";
-	case K_OBJ_DRIVER_SHARED_IRQ:
-		return "shared irq driver";
 	case K_OBJ_DRIVER_SPI:
 		return "spi driver";
 	case K_OBJ_DRIVER_UART:
 		return "uart driver";
-	case K_OBJ_DRIVER_WDT:
-		return "watchdog timer driver";
 	default:
 		return "?";
 	}
@@ -102,6 +92,19 @@ struct perm_ctx {
 	struct k_thread *parent;
 };
 
+static int thread_index_get(struct k_thread *t)
+{
+	struct _k_object *ko;
+
+	ko = _k_object_find(t);
+
+	if (!ko) {
+		return -1;
+	}
+
+	return ko->data;
+}
+
 static void wordlist_cb(struct _k_object *ko, void *ctx_ptr)
 {
 	struct perm_ctx *ctx = (struct perm_ctx *)ctx_ptr;
@@ -115,30 +118,31 @@ static void wordlist_cb(struct _k_object *ko, void *ctx_ptr)
 void _thread_perms_inherit(struct k_thread *parent, struct k_thread *child)
 {
 	struct perm_ctx ctx = {
-		parent->base.perm_index,
-		child->base.perm_index,
+		thread_index_get(parent),
+		thread_index_get(child),
 		parent
 	};
 
-	if ((ctx.parent_id < MAX_THREAD_BITS) &&
-	    (ctx.child_id < MAX_THREAD_BITS)) {
+	if ((ctx.parent_id != -1) && (ctx.child_id != -1)) {
 		_k_object_wordlist_foreach(wordlist_cb, &ctx);
 	}
 }
 
 void _thread_perms_set(struct _k_object *ko, struct k_thread *thread)
 {
-	if (thread->base.perm_index < MAX_THREAD_BITS) {
-		sys_bitfield_set_bit((mem_addr_t)&ko->perms,
-				     thread->base.perm_index);
+	int index = thread_index_get(thread);
+
+	if (index != -1) {
+		sys_bitfield_set_bit((mem_addr_t)&ko->perms, index);
 	}
 }
 
 void _thread_perms_clear(struct _k_object *ko, struct k_thread *thread)
 {
-	if (thread->base.perm_index < MAX_THREAD_BITS) {
-		sys_bitfield_clear_bit((mem_addr_t)&ko->perms,
-				       thread->base.perm_index);
+	int index = thread_index_get(thread);
+
+	if (index != -1) {
+		sys_bitfield_clear_bit((mem_addr_t)&ko->perms, index);
 	}
 }
 
@@ -151,29 +155,33 @@ static void clear_perms_cb(struct _k_object *ko, void *ctx_ptr)
 
 void _thread_perms_all_clear(struct k_thread *thread)
 {
-	if (thread->base.perm_index < MAX_THREAD_BITS) {
-		_k_object_wordlist_foreach(clear_perms_cb,
-					   (void *)thread->base.perm_index);
+	int index = thread_index_get(thread);
+
+	if (index != -1) {
+		_k_object_wordlist_foreach(clear_perms_cb, (void *)index);
 	}
 }
 
 static int thread_perms_test(struct _k_object *ko)
 {
+	int index;
+
 	if (ko->flags & K_OBJ_FLAG_PUBLIC) {
 		return 1;
 	}
 
-	if (_current->base.perm_index < MAX_THREAD_BITS) {
-		return sys_bitfield_test_bit((mem_addr_t)&ko->perms,
-					     _current->base.perm_index);
+	index = thread_index_get(_current);
+	if (index != -1) {
+		return sys_bitfield_test_bit((mem_addr_t)&ko->perms, index);
 	}
 	return 0;
 }
 
 static void dump_permission_error(struct _k_object *ko)
 {
+	int index = thread_index_get(_current);
 	printk("thread %p (%d) does not have permission on %s %p [",
-	       _current, _current->base.perm_index,
+	       _current, index,
 	       otype_to_str(ko->type), ko->name);
 	for (int i = CONFIG_MAX_THREAD_BYTES - 1; i >= 0; i--) {
 		printk("%02x", ko->perms[i]);

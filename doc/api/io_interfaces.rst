@@ -8,10 +8,20 @@ Input / Output Driver APIs
    :local:
    :backlinks: top
 
+.. comment
+   not documenting
+   .. doxygengroup:: io_interfaces
+
 ADC Interface
 *************
 
 .. doxygengroup:: adc_interface
+   :project: Zephyr
+
+DMA Interface
+*************
+
+.. doxygengroup:: DMA_interface
    :project: Zephyr
 
 GPIO Interface
@@ -60,10 +70,10 @@ SPI Interface
 .. doxygengroup:: spi_interface
    :project: Zephyr
 
-Random Interface
-****************
+Entropy Interface
+*****************
 
-.. doxygengroup:: random_interface
+.. doxygengroup:: entropy_interface
    :project: Zephyr
 
 UART Interface
@@ -72,8 +82,20 @@ UART Interface
 .. doxygengroup:: uart_interface
    :project: Zephyr
 
+Flash Interface
+***************
+
+.. doxygengroup:: flash_interface
+   :project: Zephyr
+
 Sensor Interface
 ****************
 
 .. doxygengroup:: sensor_interface
+   :project: Zephyr
+
+Counter Interface
+*****************
+
+.. doxygengroup:: counter_interface
    :project: Zephyr
